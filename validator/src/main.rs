@@ -1371,6 +1371,8 @@ pub fn main() {
         ),
     };
 
+    println!("DMLOG INIT VERSION 1");
+
     let private_rpc = matches.is_present("private_rpc");
     let no_port_check = matches.is_present("no_port_check");
     let no_rocksdb_compaction = matches.is_present("no_rocksdb_compaction");

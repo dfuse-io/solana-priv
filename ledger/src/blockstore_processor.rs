@@ -200,7 +200,9 @@ fn process_entries_with_callback(
         if entry.is_tick() {
             // If it's a tick, save it for later
             tick_hashes.push(entry.hash);
-            if bank.is_block_boundary(bank.tick_height() + tick_hashes.len() as u64) {
+            let upper_tick_height = bank.tick_height() + tick_hashes.len() as u64;
+            if bank.is_block_boundary(upper_tick_height) {
+                println!("DMLOG SLOT_BOUND {} {} {}", upper_tick_height, bank.ticks_per_slot(), entry.hash);
                 // If it's a tick that will cause a new blockhash to be created,
                 // execute the group and register the tick
                 execute_batches(
@@ -670,6 +672,48 @@ pub fn confirm_slot(
         None
     };
 
+    //****************************************************************
+    // DMLOG
+    //****************************************************************
+    let mut dmlog_last_hash = Hash::default();
+    if let Some(last_entry) = entries.last() {
+        dmlog_last_hash = last_entry.hash;
+    }
+    let roots = bank.status_cache_ancestors();
+    let min_max = bank
+        .src
+        .status_cache
+        .read()
+        .map(|value| {
+            let roots = value.roots();
+
+            (
+                roots.iter().min().cloned().unwrap_or(0),
+                roots.iter().max().cloned().unwrap_or(0),
+            )
+        })
+        .unwrap_or((0, 0));
+
+    println!(
+        "DMLOG SLOT_PROCESS {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
+        if slot_full { "full" } else { "partial" },
+        slot,
+        dmlog_last_hash,       // current SLOT hash
+        progress.last_entry,   // previous SLOT hash, not blockhash
+        bank.last_blockhash(), // previous BLOCK hash, not slot hash (in case we skipped one)
+        bank.tick_height(),
+        bank.block_height(), // total blocks created until this point (OFF BY ONE CHECK HERE)
+        roots[0],
+        roots[roots.len() - 1],
+        roots.len(),
+        min_max.0,
+        min_max.1,
+        num_entries,
+        num_txs,
+        num_shreds,
+    );
+    //****************************************************************
+
     let mut replay_elapsed = Measure::start("replay_elapsed");
     let process_result = process_entries_with_callback(
         bank,
@@ -692,6 +736,18 @@ pub fn confirm_slot(
             return Err(BlockError::InvalidEntryHash.into());
         }
     }
+
+    //****************************************************************
+    // DMLOG
+    //****************************************************************
+    if process_result.is_err() {
+        println!("DMLOG SLOT_FAILED {} {:#?}", slot, process_result);
+    } else {
+        if slot_full {
+            println!("DMLOG SLOT_END {} {} {}", slot, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
+        }
+    }
+    //****************************************************************
 
     process_result?;
 
@@ -1021,6 +1077,8 @@ fn process_single_slot(
     })?;
 
     bank.freeze(); // all banks handled by this routine are created from complete slots
+
+    println!("DMLOG BLOCK_FREEZE {} {}", bank.slot(), bank.hash());
 
     Ok(())
 }

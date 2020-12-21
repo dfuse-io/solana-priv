@@ -1,2 +1,4 @@
+ledger
 /target/
 /farf/
+.envrc

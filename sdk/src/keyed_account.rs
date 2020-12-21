@@ -34,6 +34,10 @@ impl<'a> KeyedAccount<'a> {
         self.is_writable
     }
 
+    pub fn is_signer(&self) -> bool {
+        self.is_signer
+    }
+
     pub fn lamports(&self) -> Result<u64, InstructionError> {
         Ok(self.try_borrow()?.lamports)
     }

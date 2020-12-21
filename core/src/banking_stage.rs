@@ -530,6 +530,7 @@ impl BankingStage {
         } else {
             vec![]
         };
+        println!("DMLOG HALT tpu code path. only consider tvu codepath");
         let (
             mut loaded_accounts,
             results,

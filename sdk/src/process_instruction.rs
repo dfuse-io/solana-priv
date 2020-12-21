@@ -8,7 +8,9 @@ use solana_sdk::{
     keyed_account::KeyedAccount,
     message::Message,
     pubkey::Pubkey,
+    signature::Signature,
 };
+use hex;
 use std::{cell::RefCell, fmt::Debug, rc::Rc, sync::Arc};
 
 // Prototype of a native loader entry point
@@ -27,6 +29,69 @@ pub type LoaderEntrypoint = unsafe extern "C" fn(
 pub type ProcessInstructionWithContext =
     fn(&Pubkey, &[KeyedAccount], &[u8], &mut dyn InvokeContext) -> Result<(), InstructionError>;
 
+
+#[derive(Default,Copy,Clone)]
+pub struct DMLogContext {
+    pub ordinal_number: u32,
+    pub parent_ordinal_number: u32,
+    pub trx_id: Signature,
+}
+
+impl DMLogContext {
+
+    //****************************************************************
+    // DMLOG FUNCTION ADDITION
+    //****************************************************************
+
+    pub fn inc_ordinal_number(&mut self) {
+        self.ordinal_number += 1;
+    }
+    pub fn set_parent_ordinal_number(&mut self, value: u32) {
+        self.parent_ordinal_number = value;
+    }
+    pub fn get_ordinal_number(&self) -> u32 {
+        return self.ordinal_number;
+    }
+    pub fn get_parent_ordinal_number(&self) -> u32 {
+        return self.parent_ordinal_number;
+    }
+
+    pub fn print_instruction_start(&self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
+        let accounts: Vec<String> = keyed_accounts.into_iter().map(|i| format!("{}:{}{}", i.unsigned_key(), if i.is_signer() { 1 }  else { 0 }, if i.is_writable() { 1 }  else { 0 })).collect();
+        println!(
+            "DMLOG INST_S {} {} {} {} {} {}",
+            self.trx_id,
+            self.ordinal_number,
+            self.parent_ordinal_number,
+            program_id,
+            hex::encode(instruction_data),
+            accounts.join(";"),
+        );
+    }
+
+    pub fn print_lamport_change(&self, pubkey: Pubkey, pre: u64, post: u64) {
+        println!(
+            "DMLOG LAMP_CH {} {} {} {} {}",
+            self.trx_id,
+            self.ordinal_number,
+            pubkey,
+            pre,
+            post
+        );
+    }
+
+    pub fn print_account_change(&self, pubkey: Pubkey, pre: &[u8], post: &[u8]) {
+        println!(
+            "DMLOG ACCT_CH {} {} {} {} {}",
+            self.trx_id,
+            self.ordinal_number,
+            pubkey,
+            hex::encode(pre),
+            hex::encode(post)
+        );
+    }
+}
+
 /// Invocation context passed to loaders
 pub trait InvokeContext {
     /// Push a program ID on to the invocation stack
@@ -41,6 +106,7 @@ pub trait InvokeContext {
         message: &Message,
         instruction: &CompiledInstruction,
         accounts: &[Rc<RefCell<Account>>],
+        dmlog_track: bool,
     ) -> Result<(), InstructionError>;
     /// Get the program ID of the currently executing program
     fn get_caller(&self) -> Result<&Pubkey, InstructionError>;
@@ -61,6 +127,10 @@ pub trait InvokeContext {
     fn record_instruction(&self, instruction: &Instruction);
     /// Get the bank's active feature set
     fn is_feature_active(&self, feature_id: &Pubkey) -> bool;
+
+    // DMLOG context
+    fn get_dmlog_mut(&mut self) -> &mut DMLogContext;
+    fn get_dmlog(&self) -> DMLogContext;
 }
 
 #[derive(Clone, Copy, Debug, AbiExample)]
@@ -282,6 +352,7 @@ pub struct MockInvokeContext {
     pub compute_meter: MockComputeMeter,
     pub programs: Vec<(Pubkey, ProcessInstructionWithContext)>,
     invoke_depth: usize,
+    dmlog_context: DMLogContext,
 }
 impl Default for MockInvokeContext {
     fn default() -> Self {
@@ -294,6 +365,7 @@ impl Default for MockInvokeContext {
             },
             programs: vec![],
             invoke_depth: 0,
+            dmlog_context: DMLogContext::default(),
         }
     }
 }
@@ -313,6 +385,7 @@ impl InvokeContext for MockInvokeContext {
         _message: &Message,
         _instruction: &CompiledInstruction,
         _accounts: &[Rc<RefCell<Account>>],
+        _dmlog_track: bool,
     ) -> Result<(), InstructionError> {
         Ok(())
     }
@@ -338,5 +411,12 @@ impl InvokeContext for MockInvokeContext {
     fn record_instruction(&self, _instruction: &Instruction) {}
     fn is_feature_active(&self, _feature_id: &Pubkey) -> bool {
         true
+    }
+
+    fn get_dmlog_mut(&mut self) -> &mut DMLogContext {
+        &mut self.dmlog_context
+    }
+    fn get_dmlog(&self) -> DMLogContext {
+        self.dmlog_context
     }
 }

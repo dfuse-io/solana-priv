@@ -2616,8 +2616,20 @@ impl Bank {
                         None
                     };
 
+                    let msg = tx.message();
+                    let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
+                    let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
+                    println!("DMLOG TRX_START {} {} {} {} {} {}",
+                             sigs,
+                             msg.header.num_required_signatures,
+                             msg.header.num_readonly_signed_accounts,
+                             msg.header.num_readonly_unsigned_accounts,
+                             account_keys,
+                             msg.recent_blockhash,
+                    );
                     let process_result = self.message_processor.process_message(
                         tx.message(),
+                        tx.signatures[0],
                         &loader_refcells,
                         &account_refcells,
                         &self.rent_collector,
@@ -2634,6 +2646,13 @@ impl Bank {
                                 .unwrap_or_default()
                                 .into();
 
+                        //****************************************************************
+                        // DMLOG
+                        //****************************************************************
+                        for log in log_messages.clone() {
+                            println!("DMLOG TRX_LOG {} {}", tx.signatures[0], hex::encode(log));
+                        }
+                        //****************************************************************
                         transaction_logs.push(log_messages);
                     }
 
@@ -2655,6 +2674,7 @@ impl Bank {
                     if let Err(TransactionError::InstructionError(_, _)) = &process_result {
                         error_counters.instruction_error += 1;
                     }
+                    println!("DMLOG TRX_END {}", tx.signatures[0]);
                     (process_result, hash_age_kind.clone())
                 }
             })

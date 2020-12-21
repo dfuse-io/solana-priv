@@ -4,6 +4,7 @@ use crate::{
 };
 use log::*;
 use serde::{Deserialize, Serialize};
+use solana_sdk::signature::Signature;
 use solana_sdk::{
     account::Account,
     clock::Epoch,
@@ -14,7 +15,7 @@ use solana_sdk::{
     native_loader,
     process_instruction::{
         BpfComputeBudget, ComputeMeter, Executor, InvokeContext, Logger,
-        ProcessInstructionWithContext,
+        ProcessInstructionWithContext, DMLogContext,
     },
     pubkey::Pubkey,
     rent::Rent,
@@ -77,6 +78,7 @@ impl PreAccount {
         program_id: &Pubkey,
         rent: &Rent,
         post: &Account,
+        dmlog_ctx: Option<DMLogContext>,
     ) -> Result<(), InstructionError> {
         // Only the owner of the account may change owner and
         //   only if the account is writable and
@@ -129,6 +131,12 @@ impl PreAccount {
                 return Err(InstructionError::ExternalAccountDataModified);
             } else {
                 return Err(InstructionError::ReadonlyDataModified);
+            }
+        }
+
+        if let Some(dmlog_ctx) = dmlog_ctx {
+            if self.is_writable && (self.data != post.data) {
+                dmlog_ctx.print_account_change(self.key, &self.data, &post.data)
             }
         }
 
@@ -210,7 +218,9 @@ pub struct ThisInvokeContext<'a> {
     executors: Rc<RefCell<Executors>>,
     instruction_recorder: Option<InstructionRecorder>,
     feature_set: Arc<FeatureSet>,
+    dmlog_context: DMLogContext,
 }
+
 impl<'a> ThisInvokeContext<'a> {
     pub fn new(
         program_id: &Pubkey,
@@ -222,6 +232,8 @@ impl<'a> ThisInvokeContext<'a> {
         executors: Rc<RefCell<Executors>>,
         instruction_recorder: Option<InstructionRecorder>,
         feature_set: Arc<FeatureSet>,
+        dmlog_trx_id: Signature,
+        dmlog_last_ordinal_number: u32,
     ) -> Self {
         let mut program_ids = Vec::with_capacity(bpf_compute_budget.max_invoke_depth);
         program_ids.push(*program_id);
@@ -238,6 +250,11 @@ impl<'a> ThisInvokeContext<'a> {
             executors,
             instruction_recorder,
             feature_set,
+            dmlog_context: DMLogContext{
+                ordinal_number: dmlog_last_ordinal_number,
+                parent_ordinal_number: 0,
+                trx_id: dmlog_trx_id,
+            },
         }
     }
 }
@@ -264,16 +281,22 @@ impl<'a> InvokeContext for ThisInvokeContext<'a> {
         message: &Message,
         instruction: &CompiledInstruction,
         accounts: &[Rc<RefCell<Account>>],
+        dmlog_track: bool,
     ) -> Result<(), InstructionError> {
         match self.program_ids.last() {
-            Some(key) => MessageProcessor::verify_and_update(
-                message,
-                instruction,
-                &mut self.pre_accounts,
-                accounts,
-                key,
-                &self.rent,
-            ),
+            Some(key) => {
+                let dmlog_ctx = self.get_dmlog();
+                MessageProcessor::verify_and_update(
+                    message,
+                    instruction,
+                    &mut self.pre_accounts,
+                    accounts,
+                    key,
+                    &self.rent,
+                    if dmlog_track { Some(dmlog_ctx) } else { None },
+                )
+            }
+            ,
             None => Err(InstructionError::GenericError), // Should never happen
         }
     }
@@ -307,6 +330,13 @@ impl<'a> InvokeContext for ThisInvokeContext<'a> {
     }
     fn is_feature_active(&self, feature_id: &Pubkey) -> bool {
         self.feature_set.is_active(feature_id)
+    }
+
+    fn get_dmlog_mut(&mut self) -> &mut DMLogContext {
+        &mut self.dmlog_context
+    }
+    fn get_dmlog(&self) -> DMLogContext {
+        self.dmlog_context
     }
 }
 pub struct ThisLogger {
@@ -498,14 +528,27 @@ impl MessageProcessor {
     ) -> Result<(), InstructionError> {
         if let Some(instruction) = message.instructions.get(0) {
             // Verify the calling program hasn't misbehaved
-            invoke_context.verify_and_update(message, instruction, accounts)?;
+            invoke_context.verify_and_update(message, instruction, accounts, false)?;
 
             // Construct keyed accounts
             let keyed_accounts =
                 Self::create_keyed_accounts(message, instruction, executable_accounts, accounts)?;
 
+            let program_id = instruction.program_id(&message.account_keys);
             // Invoke callee
-            invoke_context.push(instruction.program_id(&message.account_keys))?;
+            invoke_context.push(program_id)?;
+            //*********************************************************************************
+            // DMLOG: This is the call entry point for inner instruction
+            // 1) Store the current parent ordinal number to restore after the inner call is completed
+            // 2) The current ordinal number will be the parent for the next calls
+            // 3) Increment the ordinal number
+            //**********************************************************************************
+            let dmlog_ctx = invoke_context.get_dmlog_mut();
+            let dmlog_prev_parent_ordinal_number = dmlog_ctx.get_parent_ordinal_number();
+            dmlog_ctx.set_parent_ordinal_number(dmlog_ctx.get_ordinal_number());
+            dmlog_ctx.inc_ordinal_number();
+            dmlog_ctx.print_instruction_start(*program_id, &keyed_accounts, &instruction.data);
+            //****************************************************************
 
             let mut message_processor = MessageProcessor::default();
             for (program_id, process_instruction) in invoke_context.get_programs().iter() {
@@ -519,9 +562,15 @@ impl MessageProcessor {
             );
             if result.is_ok() {
                 // Verify the called program has not misbehaved
-                result = invoke_context.verify_and_update(message, instruction, accounts);
+                //<& dyn InvokeContext>,
+                result = invoke_context.verify_and_update(message, instruction, accounts, true);
             }
             invoke_context.pop();
+            //*********************************************************************************
+            // DMLOG: The inner call is completed.. we need to restore the parent ordinal number
+            //**********************************************************************************
+            invoke_context.get_dmlog_mut().set_parent_ordinal_number(dmlog_prev_parent_ordinal_number);
+            //****************************************************************
 
             result
         } else {
@@ -572,6 +621,7 @@ impl MessageProcessor {
         executable_accounts: &[(Pubkey, RefCell<Account>)],
         accounts: &[Rc<RefCell<Account>>],
         rent: &Rent,
+        dmlog_ctx: Option<DMLogContext>,
     ) -> Result<(), InstructionError> {
         // Verify all executable accounts have zero outstanding refs
         Self::verify_account_references(executable_accounts)?;
@@ -585,9 +635,27 @@ impl MessageProcessor {
                 let account = accounts[account_index]
                     .try_borrow_mut()
                     .map_err(|_| InstructionError::AccountBorrowOutstanding)?;
-                pre_accounts[unique_index].verify(&program_id, rent, &account)?;
-                pre_sum += u128::from(pre_accounts[unique_index].lamports());
-                post_sum += u128::from(account.lamports);
+                pre_accounts[unique_index].verify(
+                    &program_id,
+                    rent,
+                    &account,
+                    dmlog_ctx,
+                )?;
+                let pre_lamports = pre_accounts[unique_index].lamports();
+                let post_lamports = account.lamports;
+
+                if let Some(dmlog_ctx) = dmlog_ctx {
+                    if pre_lamports != post_lamports {
+                        dmlog_ctx.print_lamport_change(
+                            account.owner,
+                            pre_lamports,
+                            post_lamports,
+                        );
+                    }
+                }
+
+                pre_sum += u128::from(pre_lamports);
+                post_sum += u128::from(post_lamports);
                 Ok(())
             };
             instruction.visit_each_account(&mut work)?;
@@ -608,6 +676,7 @@ impl MessageProcessor {
         accounts: &[Rc<RefCell<Account>>],
         program_id: &Pubkey,
         rent: &Rent,
+        dmlog_ctx: Option<DMLogContext>,
     ) -> Result<(), InstructionError> {
         // Verify the per-account instruction results
         let (mut pre_sum, mut post_sum) = (0_u128, 0_u128);
@@ -622,7 +691,7 @@ impl MessageProcessor {
                         .try_borrow_mut()
                         .map_err(|_| InstructionError::AccountBorrowOutstanding)?;
 
-                    pre_account.verify(&program_id, &rent, &account)?;
+                    pre_account.verify(&program_id, &rent, &account, dmlog_ctx)?;
                     pre_sum += u128::from(pre_account.lamports());
                     post_sum += u128::from(account.lamports);
 
@@ -650,6 +719,7 @@ impl MessageProcessor {
     fn execute_instruction(
         &self,
         message: &Message,
+        dmlog_trx_id: Signature,
         instruction: &CompiledInstruction,
         executable_accounts: &[(Pubkey, RefCell<Account>)],
         accounts: &[Rc<RefCell<Account>>],
@@ -660,7 +730,8 @@ impl MessageProcessor {
         instruction_index: usize,
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
-    ) -> Result<(), InstructionError> {
+        dmlog_last_ordinal_number: u32,
+    ) -> Result<u32, InstructionError> {
         // Fixup the special instructions key if present
         // before the account pre-values are taken care of
         if feature_set.is_active(&instructions_sysvar_enabled::id()) {
@@ -675,10 +746,10 @@ impl MessageProcessor {
                 }
             }
         }
-
         let pre_accounts = Self::create_pre_accounts(message, instruction, accounts);
+        let root_program_id = instruction.program_id(&message.account_keys);
         let mut invoke_context = ThisInvokeContext::new(
-            instruction.program_id(&message.account_keys),
+            root_program_id,
             rent_collector.rent,
             pre_accounts,
             &self.programs,
@@ -687,9 +758,19 @@ impl MessageProcessor {
             executors,
             instruction_recorder,
             feature_set,
+            dmlog_trx_id,
+            dmlog_last_ordinal_number,
         );
         let keyed_accounts =
             Self::create_keyed_accounts(message, instruction, executable_accounts, accounts)?;
+
+        //****************************************************************
+        // DMLOG: This is the call entry point for top level instructions
+        //****************************************************************
+        let dmlog_ctx = invoke_context.get_dmlog_mut();
+        dmlog_ctx.inc_ordinal_number();
+        dmlog_ctx.print_instruction_start(*root_program_id, &keyed_accounts, &instruction.data);
+        //****************************************************************
         self.process_instruction(&keyed_accounts, &instruction.data, &mut invoke_context)?;
         Self::verify(
             message,
@@ -698,8 +779,11 @@ impl MessageProcessor {
             executable_accounts,
             accounts,
             &rent_collector.rent,
+            Some(invoke_context.get_dmlog()),
         )?;
-        Ok(())
+
+        let dmlog_ctx = invoke_context.get_dmlog_mut();
+        Ok(dmlog_ctx.get_ordinal_number())
     }
 
     /// Process a message.
@@ -709,6 +793,7 @@ impl MessageProcessor {
     pub fn process_message(
         &self,
         message: &Message,
+        dmlog_trx_id: Signature,
         loaders: &[Vec<(Pubkey, RefCell<Account>)>],
         accounts: &[Rc<RefCell<Account>>],
         rent_collector: &RentCollector,
@@ -718,24 +803,28 @@ impl MessageProcessor {
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
     ) -> Result<(), TransactionError> {
+        let mut dmlog_last_ordinal_number = 0;
         for (instruction_index, instruction) in message.instructions.iter().enumerate() {
             let instruction_recorder = instruction_recorders
                 .as_ref()
                 .map(|recorders| recorders[instruction_index].clone());
-            self.execute_instruction(
-                message,
-                instruction,
-                &loaders[instruction_index],
-                accounts,
-                rent_collector,
-                log_collector.clone(),
-                executors.clone(),
-                instruction_recorder,
-                instruction_index,
-                feature_set.clone(),
-                bpf_compute_budget,
-            )
-            .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
+            dmlog_last_ordinal_number = self
+                .execute_instruction(
+                    message,
+                    dmlog_trx_id,
+                    instruction,
+                    &loaders[instruction_index],
+                    accounts,
+                    rent_collector,
+                    log_collector.clone(),
+                    executors.clone(),
+                    instruction_recorder,
+                    instruction_index,
+                    feature_set.clone(),
+                    bpf_compute_budget,
+                    dmlog_last_ordinal_number,
+                )
+                .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
         }
         Ok(())
     }
@@ -935,7 +1024,7 @@ mod tests {
             self
         }
         pub fn verify(&self) -> Result<(), InstructionError> {
-            self.pre.verify(&self.program_id, &self.rent, &self.post)
+            self.pre.verify(&self.program_id, &self.rent, &self.post, None)
         }
     }
 

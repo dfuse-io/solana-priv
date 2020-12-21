@@ -20,11 +20,11 @@ fn bench_verify_account_changes_data(bencher: &mut Bencher) {
         false,
     );
     let post = Account::new(0, BUFSIZE, &owner);
-    assert_eq!(pre.verify(&owner, &Rent::default(), &post), Ok(()));
+    assert_eq!(pre.verify(&owner, &Rent::default(), &post, None), Ok(()));
 
     // this one should be faster
     bencher.iter(|| {
-        pre.verify(&owner, &Rent::default(), &post).unwrap();
+        pre.verify(&owner, &Rent::default(), &post, None).unwrap();
     });
     let summary = bencher.bench(|_bencher| {}).unwrap();
     info!("data no change by owner: {} ns/iter", summary.median);
@@ -42,7 +42,7 @@ fn bench_verify_account_changes_data(bencher: &mut Bencher) {
         false,
     );
     bencher.iter(|| {
-        pre.verify(&non_owner, &Rent::default(), &post).unwrap();
+        pre.verify(&non_owner, &Rent::default(), &post, None).unwrap();
     });
     let summary = bencher.bench(|_bencher| {}).unwrap();
     info!("data no change by non owner: {} ns/iter", summary.median);
