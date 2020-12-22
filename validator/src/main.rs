@@ -11,7 +11,7 @@ use solana_clap_utils::{
     },
     keypair::SKIP_SEED_PHRASE_VALIDATION_ARG,
 };
-use solana_client::rpc_client::RpcClient;
+use solana_client::{rpc_client::RpcClient, rpc_request::MAX_MULTIPLE_ACCOUNTS};
 use solana_core::ledger_cleanup_service::{
     DEFAULT_MAX_LEDGER_SHREDS, DEFAULT_MIN_MAX_LEDGER_SHREDS,
 };
@@ -212,7 +212,9 @@ fn get_rpc_node(
         );
 
         if rpc_peers_blacklisted == rpc_peers_total {
-            retry_reason = if blacklist_timeout.elapsed().as_secs() > 60 {
+            retry_reason = if !blacklisted_rpc_nodes.is_empty()
+                && blacklist_timeout.elapsed().as_secs() > 60
+            {
                 // If all nodes are blacklisted and no additional nodes are discovered after 60 seconds,
                 // remove the blacklist and try them all again
                 blacklisted_rpc_nodes.clear();
@@ -447,6 +449,7 @@ fn download_then_check_genesis_hash(
     expected_genesis_hash: Option<Hash>,
     max_genesis_archive_unpacked_size: u64,
     no_genesis_fetch: bool,
+    use_progress_bar: bool,
 ) -> Result<Hash, String> {
     if no_genesis_fetch {
         let genesis_config = load_local_genesis(ledger_path, expected_genesis_hash)?;
@@ -454,26 +457,27 @@ fn download_then_check_genesis_hash(
     }
 
     let genesis_package = ledger_path.join("genesis.tar.bz2");
-    let genesis_config =
-        if let Ok(tmp_genesis_package) = download_genesis_if_missing(rpc_addr, &genesis_package) {
-            unpack_genesis_archive(
-                &tmp_genesis_package,
-                &ledger_path,
-                max_genesis_archive_unpacked_size,
-            )
-            .map_err(|err| format!("Failed to unpack downloaded genesis config: {}", err))?;
+    let genesis_config = if let Ok(tmp_genesis_package) =
+        download_genesis_if_missing(rpc_addr, &genesis_package, use_progress_bar)
+    {
+        unpack_genesis_archive(
+            &tmp_genesis_package,
+            &ledger_path,
+            max_genesis_archive_unpacked_size,
+        )
+        .map_err(|err| format!("Failed to unpack downloaded genesis config: {}", err))?;
 
-            let downloaded_genesis = GenesisConfig::load(&ledger_path)
-                .map_err(|err| format!("Failed to load downloaded genesis config: {}", err))?;
+        let downloaded_genesis = GenesisConfig::load(&ledger_path)
+            .map_err(|err| format!("Failed to load downloaded genesis config: {}", err))?;
 
-            check_genesis_hash(&downloaded_genesis, expected_genesis_hash)?;
-            std::fs::rename(tmp_genesis_package, genesis_package)
-                .map_err(|err| format!("Unable to rename: {:?}", err))?;
+        check_genesis_hash(&downloaded_genesis, expected_genesis_hash)?;
+        std::fs::rename(tmp_genesis_package, genesis_package)
+            .map_err(|err| format!("Unable to rename: {:?}", err))?;
 
-            downloaded_genesis
-        } else {
-            load_local_genesis(ledger_path, expected_genesis_hash)?
-        };
+        downloaded_genesis
+    } else {
+        load_local_genesis(ledger_path, expected_genesis_hash)?
+    };
 
     Ok(genesis_config.hash())
 }
@@ -636,6 +640,7 @@ fn rpc_bootstrap(
     validator_config: &mut ValidatorConfig,
     bootstrap_config: RpcBootstrapConfig,
     no_port_check: bool,
+    use_progress_bar: bool,
     maximum_local_snapshot_age: Slot,
 ) {
     if !no_port_check {
@@ -694,6 +699,7 @@ fn rpc_bootstrap(
                 validator_config.expected_genesis_hash,
                 bootstrap_config.max_genesis_archive_unpacked_size,
                 bootstrap_config.no_genesis_fetch,
+                use_progress_bar,
             );
 
             if let Ok(genesis_hash) = genesis_hash {
@@ -747,6 +753,7 @@ fn rpc_bootstrap(
                                 &rpc_contact_info.rpc,
                                 &ledger_path,
                                 snapshot_hash,
+                                use_progress_bar,
                             );
                             gossip_service.join().unwrap();
                             ret
@@ -814,6 +821,7 @@ fn create_validator(
     mut validator_config: ValidatorConfig,
     rpc_bootstrap_config: RpcBootstrapConfig,
     no_port_check: bool,
+    use_progress_bar: bool,
     maximum_local_snapshot_age: Slot,
 ) -> Validator {
     if validator_config.cuda {
@@ -834,6 +842,7 @@ fn create_validator(
             &mut validator_config,
             rpc_bootstrap_config,
             no_port_check,
+            use_progress_bar,
             maximum_local_snapshot_age,
         );
     }
@@ -853,6 +862,7 @@ pub fn main() {
     let default_dynamic_port_range =
         &format!("{}-{}", VALIDATOR_PORT_RANGE.0, VALIDATOR_PORT_RANGE.1);
     let default_genesis_archive_unpacked_size = &MAX_GENESIS_ARCHIVE_UNPACKED_SIZE.to_string();
+    let default_rpc_max_multiple_accounts = &MAX_MULTIPLE_ACCOUNTS.to_string();
     let default_rpc_pubsub_max_connections = PubSubConfig::default().max_connections.to_string();
     let default_rpc_pubsub_max_fragment_size =
         PubSubConfig::default().max_fragment_size.to_string();
@@ -1029,6 +1039,15 @@ pub fn main() {
                 .requires("enable_rpc_transaction_history")
                 .takes_value(false)
                 .help("Upload new confirmed blocks into a BigTable instance"),
+        )
+        .arg(
+            Arg::with_name("rpc_max_multiple_accounts")
+                .long("rpc-max-multiple-accounts")
+                .value_name("MAX ACCOUNTS")
+                .takes_value(true)
+                .default_value(default_rpc_max_multiple_accounts)
+                .help("Override the default maximum accounts accepted by \
+                       the getMultipleAccounts JSON RPC method")
         )
         .arg(
             Arg::with_name("health_check_slot_distance")
@@ -1484,6 +1503,11 @@ pub fn main() {
             faucet_addr: matches.value_of("rpc_faucet_addr").map(|address| {
                 solana_net_utils::parse_host_port(address).expect("failed to parse faucet address")
             }),
+            max_multiple_accounts: Some(value_t_or_exit!(
+                matches,
+                "rpc_max_multiple_accounts",
+                usize
+            )),
             health_check_slot_distance: value_t_or_exit!(
                 matches,
                 "health_check_slot_distance",
@@ -1672,6 +1696,7 @@ pub fn main() {
             Some(logfile)
         }
     };
+    let use_progress_bar = logfile.is_none();
     let _logger_thread = start_logger(logfile);
 
     // Default to RUST_BACKTRACE=1 for more informative validator logs
@@ -1765,6 +1790,7 @@ pub fn main() {
         validator_config,
         rpc_bootstrap_config,
         no_port_check,
+        use_progress_bar,
         maximum_local_snapshot_age,
     );
 

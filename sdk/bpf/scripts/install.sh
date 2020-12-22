@@ -105,7 +105,11 @@ if [[ ! -e xargo-$version.md ]] || [[ ! -x bin/xargo ]]; then
 fi
 
 # Install Criterion
-version=v2.3.2
+if [[ $machine == "linux" ]]; then
+  version=v2.3.3
+else
+  version=v2.3.2
+fi
 if [[ ! -e criterion-$version.md || ! -e criterion ]]; then
   (
     set -e
@@ -174,7 +178,7 @@ if [[ ! -e rust-bpf-$machine-$version.md || ! -e rust-bpf-$machine ]]; then
 fi
 
 # Install Rust-BPF Sysroot sources
-version=v0.12
+version=v0.13
 if [[ ! -e rust-bpf-sysroot-$version.md || ! -e rust-bpf-sysroot ]]; then
   (
     set -e

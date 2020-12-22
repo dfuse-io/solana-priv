@@ -1,7 +1,6 @@
 //! The `replay_stage` replays transactions broadcast by the leader.
 
 use crate::{
-    bank_weight_fork_choice::BankWeightForkChoice,
     broadcast_stage::RetransmitSlotsSender,
     cache_block_time_service::CacheBlockTimeSender,
     cluster_info::ClusterInfo,
@@ -259,13 +258,11 @@ impl ReplayStage {
                 let (
                     mut progress,
                     mut heaviest_subtree_fork_choice,
-                    unlock_heaviest_subtree_fork_choice_slot,
                 ) = Self::initialize_progress_and_fork_choice_with_locked_bank_forks(
                     &bank_forks,
                     &my_pubkey,
                     &vote_account,
                 );
-                let mut bank_weight_fork_choice = BankWeightForkChoice::default();
                 let mut current_leader = None;
                 let mut last_reset = Hash::default();
                 let mut partition_exists = false;
@@ -355,7 +352,6 @@ impl ReplayStage {
                         &bank_forks,
                         &mut all_pubkeys,
                         &mut heaviest_subtree_fork_choice,
-                        &mut bank_weight_fork_choice,
                     );
                     compute_bank_stats_time.stop();
 
@@ -382,11 +378,7 @@ impl ReplayStage {
 
                     let mut select_forks_time = Measure::start("select_forks_time");
                     let fork_choice: &mut dyn ForkChoice =
-                        if forks_root > unlock_heaviest_subtree_fork_choice_slot {
-                            &mut heaviest_subtree_fork_choice
-                        } else {
-                            &mut bank_weight_fork_choice
-                        };
+                            &mut heaviest_subtree_fork_choice;
                     let (heaviest_bank, heaviest_bank_on_same_voted_fork) = fork_choice
                         .select_forks(&frozen_banks, &tower, &progress, &ancestors, &bank_forks);
                     select_forks_time.stop();
@@ -620,7 +612,7 @@ impl ReplayStage {
         bank_forks: &RwLock<BankForks>,
         my_pubkey: &Pubkey,
         vote_account: &Pubkey,
-    ) -> (ProgressMap, HeaviestSubtreeForkChoice, Slot) {
+    ) -> (ProgressMap, HeaviestSubtreeForkChoice) {
         let (root_bank, frozen_banks) = {
             let bank_forks = bank_forks.read().unwrap();
             (
@@ -642,7 +634,7 @@ impl ReplayStage {
         mut frozen_banks: Vec<Arc<Bank>>,
         my_pubkey: &Pubkey,
         vote_account: &Pubkey,
-    ) -> (ProgressMap, HeaviestSubtreeForkChoice, Slot) {
+    ) -> (ProgressMap, HeaviestSubtreeForkChoice) {
         let mut progress = ProgressMap::default();
 
         frozen_banks.sort_by_key(|bank| bank.slot());
@@ -663,16 +655,10 @@ impl ReplayStage {
             );
         }
         let root = root_bank.slot();
-        let unlock_heaviest_subtree_fork_choice_slot =
-            Self::get_unlock_heaviest_subtree_fork_choice(root_bank.cluster_type());
         let heaviest_subtree_fork_choice =
             HeaviestSubtreeForkChoice::new_from_frozen_banks(root, &frozen_banks);
 
-        (
-            progress,
-            heaviest_subtree_fork_choice,
-            unlock_heaviest_subtree_fork_choice_slot,
-        )
+        (progress, heaviest_subtree_fork_choice)
     }
 
     fn report_memory(
@@ -987,27 +973,41 @@ impl ReplayStage {
             // errors related to the slot being purged
             let slot = bank.slot();
             warn!("Fatal replay error in slot: {}, err: {:?}", slot, err);
-            if let BlockstoreProcessorError::InvalidBlock(BlockError::InvalidTickCount) = err {
-                datapoint_info!(
-                    "replay-stage-mark_dead_slot",
-                    ("error", format!("error: {:?}", err), String),
-                    ("slot", slot, i64)
-                );
-            } else {
-                datapoint_error!(
-                    "replay-stage-mark_dead_slot",
-                    ("error", format!("error: {:?}", err), String),
-                    ("slot", slot, i64)
-                );
-            }
-            bank_progress.is_dead = true;
-            blockstore
-                .set_dead_slot(slot)
-                .expect("Failed to mark slot as dead in blockstore");
+            let is_serious = matches!(
+                err,
+                BlockstoreProcessorError::InvalidBlock(BlockError::InvalidTickCount)
+            );
+            Self::mark_dead_slot(blockstore, bank_progress, slot, &err, is_serious);
             err
         })?;
 
         Ok(tx_count)
+    }
+
+    fn mark_dead_slot(
+        blockstore: &Blockstore,
+        bank_progress: &mut ForkProgress,
+        slot: Slot,
+        err: &BlockstoreProcessorError,
+        is_serious: bool,
+    ) {
+        if is_serious {
+            datapoint_error!(
+                "replay-stage-mark_dead_slot",
+                ("error", format!("error: {:?}", err), String),
+                ("slot", slot, i64)
+            );
+        } else {
+            datapoint_info!(
+                "replay-stage-mark_dead_slot",
+                ("error", format!("error: {:?}", err), String),
+                ("slot", slot, i64)
+            );
+        }
+        bank_progress.is_dead = true;
+        blockstore
+            .set_dead_slot(slot)
+            .expect("Failed to mark slot as dead in blockstore");
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1321,23 +1321,40 @@ impl ReplayStage {
             }
             assert_eq!(*bank_slot, bank.slot());
             if bank.is_complete() {
-                bank_progress.replay_stats.report_stats(
-                    bank.slot(),
-                    bank_progress.replay_progress.num_entries,
-                    bank_progress.replay_progress.num_shreds,
-                );
-                did_complete_bank = true;
-                info!("bank frozen: {}", bank.slot());
-                bank.freeze();
-                heaviest_subtree_fork_choice
-                    .add_new_leaf_slot(bank.slot(), Some(bank.parent_slot()));
-                if let Some(sender) = bank_notification_sender {
-                    sender
-                        .send(BankNotification::Frozen(bank.clone()))
-                        .unwrap_or_else(|err| warn!("bank_notification_sender failed: {:?}", err));
-                }
+                if !blockstore.has_duplicate_shreds_in_slot(bank.slot()) {
+                    bank_progress.replay_stats.report_stats(
+                        bank.slot(),
+                        bank_progress.replay_progress.num_entries,
+                        bank_progress.replay_progress.num_shreds,
+                    );
+                    did_complete_bank = true;
+                    info!("bank frozen: {}", bank.slot());
+                    bank.freeze();
+                    heaviest_subtree_fork_choice
+                        .add_new_leaf_slot(bank.slot(), Some(bank.parent_slot()));
+                    if let Some(sender) = bank_notification_sender {
+                        sender
+                            .send(BankNotification::Frozen(bank.clone()))
+                            .unwrap_or_else(|err| {
+                                warn!("bank_notification_sender failed: {:?}", err)
+                            });
+                    }
 
-                Self::record_rewards(&bank, &rewards_recorder_sender);
+                    Self::record_rewards(&bank, &rewards_recorder_sender);
+                } else {
+                    Self::mark_dead_slot(
+                        blockstore,
+                        bank_progress,
+                        bank.slot(),
+                        &BlockstoreProcessorError::InvalidBlock(BlockError::DuplicateBlock),
+                        true,
+                    );
+                    warn!(
+                        "{} duplicate shreds detected, not freezing bank {}",
+                        my_pubkey,
+                        bank.slot()
+                    );
+                }
             } else {
                 trace!(
                     "bank {} not completed tick_height: {}, max_tick_height: {}",
@@ -1363,7 +1380,6 @@ impl ReplayStage {
         bank_forks: &RwLock<BankForks>,
         all_pubkeys: &mut PubkeyReferences,
         heaviest_subtree_fork_choice: &mut dyn ForkChoice,
-        bank_weight_fork_choice: &mut dyn ForkChoice,
     ) -> Vec<Slot> {
         frozen_banks.sort_by_key(|bank| bank.slot());
         let mut new_stats = vec![];
@@ -1388,12 +1404,6 @@ impl ReplayStage {
                     // Notify any listeners of the votes found in this newly computed
                     // bank
                     heaviest_subtree_fork_choice.compute_bank_stats(
-                        &bank,
-                        tower,
-                        progress,
-                        &computed_bank_state,
-                    );
-                    bank_weight_fork_choice.compute_bank_stats(
                         &bank,
                         tower,
                         progress,
@@ -1935,17 +1945,6 @@ impl ReplayStage {
     }
 
     pub fn get_unlock_switch_vote_slot(cluster_type: ClusterType) -> Slot {
-        match cluster_type {
-            ClusterType::Development => 0,
-            ClusterType::Devnet => 0,
-            // Epoch 63
-            ClusterType::Testnet => 21_692_256,
-            // 400_000 slots into epoch 61
-            ClusterType::MainnetBeta => 26_752_000,
-        }
-    }
-
-    pub fn get_unlock_heaviest_subtree_fork_choice(cluster_type: ClusterType) -> Slot {
         match cluster_type {
             ClusterType::Development => 0,
             ClusterType::Devnet => 0,
@@ -2822,7 +2821,6 @@ pub(crate) mod tests {
             &bank_forks,
             &mut PubkeyReferences::default(),
             &mut heaviest_subtree_fork_choice,
-            &mut BankWeightForkChoice::default(),
         );
 
         // bank 0 has no votes, should not send any votes on the channel
@@ -2868,7 +2866,6 @@ pub(crate) mod tests {
             &bank_forks,
             &mut PubkeyReferences::default(),
             &mut heaviest_subtree_fork_choice,
-            &mut BankWeightForkChoice::default(),
         );
 
         // Bank 1 had one vote
@@ -2904,7 +2901,6 @@ pub(crate) mod tests {
             &bank_forks,
             &mut PubkeyReferences::default(),
             &mut heaviest_subtree_fork_choice,
-            &mut BankWeightForkChoice::default(),
         );
         // No new stats should have been computed
         assert!(newly_computed.is_empty());
@@ -2942,7 +2938,6 @@ pub(crate) mod tests {
             &vote_simulator.bank_forks,
             &mut PubkeyReferences::default(),
             &mut heaviest_subtree_fork_choice,
-            &mut BankWeightForkChoice::default(),
         );
 
         assert_eq!(
@@ -2951,17 +2946,6 @@ pub(crate) mod tests {
         );
 
         let (heaviest_bank, _) = heaviest_subtree_fork_choice.select_forks(
-            &frozen_banks,
-            &tower,
-            &vote_simulator.progress,
-            &ancestors,
-            &vote_simulator.bank_forks,
-        );
-
-        // Should pick the lower of the two equally weighted banks
-        assert_eq!(heaviest_bank.slot(), 1);
-
-        let (heaviest_bank, _) = BankWeightForkChoice::default().select_forks(
             &frozen_banks,
             &tower,
             &vote_simulator.progress,
@@ -3016,7 +3000,6 @@ pub(crate) mod tests {
             &vote_simulator.bank_forks,
             &mut PubkeyReferences::default(),
             &mut vote_simulator.heaviest_subtree_fork_choice,
-            &mut BankWeightForkChoice::default(),
         );
 
         frozen_banks.sort_by_key(|bank| bank.slot());
@@ -3832,7 +3815,6 @@ pub(crate) mod tests {
             &bank_forks,
             &mut PubkeyReferences::default(),
             &mut HeaviestSubtreeForkChoice::new_from_bank_forks(&bank_forks.read().unwrap()),
-            &mut BankWeightForkChoice::default(),
         );
 
         // Check status is true

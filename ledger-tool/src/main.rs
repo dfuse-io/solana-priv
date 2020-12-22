@@ -9,7 +9,9 @@ use serde::Serialize;
 use serde_json::json;
 use solana_clap_utils::{
     input_parsers::{cluster_type_of, pubkey_of, pubkeys_of},
-    input_validators::{is_parsable, is_pubkey_or_keypair, is_slot, is_valid_percentage},
+    input_validators::{
+        is_parsable, is_pubkey, is_pubkey_or_keypair, is_slot, is_valid_percentage,
+    },
 };
 use solana_ledger::entry::Entry;
 use solana_ledger::{
@@ -19,6 +21,7 @@ use solana_ledger::{
     blockstore_db::{self, AccessType, BlockstoreRecoveryMode, Column, Database},
     blockstore_processor::ProcessOptions,
     rooted_slot_iterator::RootedSlotIterator,
+    shred::Shred,
 };
 use solana_runtime::{
     bank::{Bank, RewardCalculationEvent},
@@ -739,6 +742,11 @@ fn main() {
         .takes_value(true)
         .default_value("0")
         .help("Start at this slot");
+    let ending_slot_arg = Arg::with_name("ending_slot")
+        .long("ending-slot")
+        .value_name("SLOT")
+        .takes_value(true)
+        .help("The last slot to iterate to");
     let no_snapshot_arg = Arg::with_name("no_snapshot")
         .long("no-snapshot")
         .takes_value(false)
@@ -924,13 +932,7 @@ fn main() {
             SubCommand::with_name("parse_full_frozen")
             .about("Parses log for information about critical events about ancestors of the given `ending_slot`")
             .arg(&starting_slot_arg)
-            .arg(
-                Arg::with_name("ending_slot")
-                    .long("ending-slot")
-                    .value_name("SLOT")
-                    .takes_value(true)
-                    .help("The last slot to iterate to"),
-            )
+            .arg(&ending_slot_arg)
             .arg(
                 Arg::with_name("log_path")
                     .long("log-path")
@@ -971,6 +973,12 @@ fn main() {
             .about("Prints the ledger's shred hash")
             .arg(&hard_forks_arg)
             .arg(&max_genesis_archive_unpacked_size_arg)
+        )
+        .subcommand(
+            SubCommand::with_name("shred-meta")
+            .about("Prints raw shred metadata")
+            .arg(&starting_slot_arg)
+            .arg(&ending_slot_arg)
         )
         .subcommand(
             SubCommand::with_name("bank-hash")
@@ -1140,6 +1148,16 @@ fn main() {
                     .help("Re-calculate the bank hash and overwrite the original bank hash."),
             )
             .arg(
+                Arg::with_name("accounts_to_remove")
+                    .required(false)
+                    .long("remove-account")
+                    .takes_value(true)
+                    .value_name("PUBKEY")
+                    .validator(is_pubkey)
+                    .multiple(true)
+                    .help("List if accounts to remove while creating the snapshot"),
+            )
+            .arg(
                 Arg::with_name("remove_stake_accounts")
                     .required(false)
                     .long("remove-stake-accounts")
@@ -1184,11 +1202,12 @@ fn main() {
                            which could be an epoch in a galaxy far far away"),
             )
             .arg(
-                Arg::with_name("enable_inflation")
+                Arg::with_name("inflation")
                     .required(false)
-                    .long("enable-inflation")
-                    .takes_value(false)
-                    .help("Always enable inflation when warping even if it's disabled"),
+                    .long("inflation")
+                    .takes_value(true)
+                    .possible_values(&["pico", "full", "none"])
+                    .help("Overwrite inflation when warping"),
             )
             .arg(
                 Arg::with_name("enable_stake_program_v2")
@@ -1420,6 +1439,46 @@ fn main() {
                 Err(err) => {
                     eprintln!("Failed to load ledger: {:?}", err);
                     exit(1);
+                }
+            }
+        }
+        ("shred-meta", Some(arg_matches)) => {
+            #[derive(Debug)]
+            struct ShredMeta<'a> {
+                slot: Slot,
+                full_slot: bool,
+                shred_index: usize,
+                data: bool,
+                code: bool,
+                last_in_slot: bool,
+                data_complete: bool,
+                shred: &'a Shred,
+            };
+            let starting_slot = value_t_or_exit!(arg_matches, "starting_slot", Slot);
+            let ending_slot = value_t!(arg_matches, "ending_slot", Slot).unwrap_or(Slot::MAX);
+            let ledger = open_blockstore(&ledger_path, AccessType::TryPrimaryThenSecondary, None);
+            for (slot, _meta) in ledger
+                .slot_meta_iterator(starting_slot)
+                .unwrap()
+                .take_while(|(slot, _)| *slot <= ending_slot)
+            {
+                let full_slot = ledger.is_full(slot);
+                if let Ok(shreds) = ledger.get_data_shreds_for_slot(slot, 0) {
+                    for (shred_index, shred) in shreds.iter().enumerate() {
+                        println!(
+                            "{:#?}",
+                            ShredMeta {
+                                slot,
+                                full_slot,
+                                shred_index,
+                                data: shred.is_data(),
+                                code: shred.is_code(),
+                                data_complete: shred.data_complete(),
+                                last_in_slot: shred.last_in_slot(),
+                                shred,
+                            }
+                        );
+                    }
                 }
             }
         }
@@ -1678,6 +1737,8 @@ fn main() {
                 exit(1);
             }
             let bootstrap_validator_pubkeys = pubkeys_of(&arg_matches, "bootstrap_validator");
+            let accounts_to_remove =
+                pubkeys_of(&arg_matches, "accounts_to_remove").unwrap_or_default();
 
             let snapshot_version =
                 arg_matches
@@ -1744,6 +1805,14 @@ fn main() {
                             .get_program_accounts(&solana_stake_program::id())
                             .into_iter()
                         {
+                            account.lamports = 0;
+                            bank.store_account(&address, &account);
+                        }
+                    }
+
+                    for address in accounts_to_remove {
+                        if let Some(mut account) = bank.get_account(&address) {
+                            rehash = true;
                             account.lamports = 0;
                             bank.store_account(&address, &account);
                         }
@@ -2022,8 +2091,13 @@ fn main() {
                             exit(1);
                         }
 
-                        if arg_matches.is_present("enable_inflation") {
-                            let inflation = Inflation::pico();
+                        if let Ok(raw_inflation) = value_t!(arg_matches, "inflation", String) {
+                            let inflation = match raw_inflation.as_str() {
+                                "pico" => Inflation::pico(),
+                                "full" => Inflation::full(),
+                                "none" => Inflation::new_disabled(),
+                                _ => unreachable!(),
+                            };
                             println!(
                                 "Forcing to: {:?} (was: {:?})",
                                 inflation,
@@ -2072,6 +2146,10 @@ fn main() {
                                     ),
                                 );
                                 force_enabled_count += 1;
+                            }
+
+                            if force_enabled_count == 0 {
+                                warn!("Already stake_program_v2 is activated (or scheduled)");
                             }
 
                             let mut store_failed_count = 0;
@@ -2466,7 +2544,7 @@ fn main() {
                         if arg_matches.is_present("recalculate_capitalization") {
                             eprintln!("Capitalization isn't verified because it's recalculated");
                         }
-                        if arg_matches.is_present("enable_inflation") {
+                        if arg_matches.is_present("inflation") {
                             eprintln!(
                                 "Forcing inflation isn't meaningful because bank isn't warping"
                             );

@@ -275,25 +275,23 @@ impl CachedExecutors {
         })
     }
     fn put(&mut self, pubkey: &Pubkey, executor: Arc<dyn Executor>) {
-        if !self.executors.contains_key(pubkey) {
-            if self.executors.len() >= self.max {
-                let mut least = u64::MAX;
-                let default_key = Pubkey::default();
-                let mut least_key = &default_key;
-                for (key, (count, _)) in self.executors.iter() {
-                    let count = count.load(Relaxed);
-                    if count < least {
-                        least = count;
-                        least_key = key;
-                    }
+        if !self.executors.contains_key(pubkey) && self.executors.len() >= self.max {
+            let mut least = u64::MAX;
+            let default_key = Pubkey::default();
+            let mut least_key = &default_key;
+            for (key, (count, _)) in self.executors.iter() {
+                let count = count.load(Relaxed);
+                if count < least {
+                    least = count;
+                    least_key = key;
                 }
-                let least_key = *least_key;
-                let _ = self.executors.remove(&least_key);
             }
-            let _ = self
-                .executors
-                .insert(*pubkey, (AtomicU64::new(0), executor));
+            let least_key = *least_key;
+            let _ = self.executors.remove(&least_key);
         }
+        let _ = self
+            .executors
+            .insert(*pubkey, (AtomicU64::new(0), executor));
     }
     fn remove(&mut self, pubkey: &Pubkey) {
         let _ = self.executors.remove(pubkey);
@@ -2806,7 +2804,9 @@ impl Bank {
                         loader_refcells,
                     );
 
-                    self.update_executors(executors);
+                    if process_result.is_ok() {
+                        self.update_executors(executors);
+                    }
 
                     let nonce_rollback =
                         if let Err(TransactionError::InstructionError(_, _)) = &process_result {
@@ -3714,14 +3714,18 @@ impl Bank {
     }
 
     #[cfg(test)]
-    fn add_account_and_update_capitalization(&self, pubkey: &Pubkey, new_account: &Account) {
+    fn store_account_and_update_capitalization(&self, pubkey: &Pubkey, new_account: &Account) {
         if let Some(old_account) = self.get_account(&pubkey) {
-            if new_account.lamports > old_account.lamports {
-                self.capitalization
-                    .fetch_add(new_account.lamports - old_account.lamports, Relaxed);
-            } else {
-                self.capitalization
-                    .fetch_sub(old_account.lamports - new_account.lamports, Relaxed);
+            match new_account.lamports.cmp(&old_account.lamports) {
+                std::cmp::Ordering::Greater => {
+                    self.capitalization
+                        .fetch_add(new_account.lamports - old_account.lamports, Relaxed);
+                }
+                std::cmp::Ordering::Less => {
+                    self.capitalization
+                        .fetch_sub(old_account.lamports - new_account.lamports, Relaxed);
+                }
+                std::cmp::Ordering::Equal => {}
             }
         } else {
             self.capitalization.fetch_add(new_account.lamports, Relaxed);
@@ -5152,6 +5156,84 @@ pub(crate) mod tests {
         bank
     }
 
+    fn assert_capitalization_diff(bank: &Bank, updater: impl Fn(), asserter: impl Fn(u64, u64)) {
+        let old = bank.capitalization();
+        updater();
+        let new = bank.capitalization();
+        asserter(old, new);
+        assert_eq!(bank.capitalization(), bank.calculate_capitalization());
+    }
+
+    #[test]
+    fn test_store_account_and_update_capitalization_missing() {
+        let (genesis_config, _mint_keypair) = create_genesis_config(0);
+        let bank = Bank::new(&genesis_config);
+        let pubkey = solana_sdk::pubkey::new_rand();
+
+        let some_lamports = 400;
+        let account = Account::new(some_lamports, 0, &system_program::id());
+
+        assert_capitalization_diff(
+            &bank,
+            || bank.store_account_and_update_capitalization(&pubkey, &account),
+            |old, new| assert_eq!(old + some_lamports, new),
+        );
+        assert_eq!(account, bank.get_account(&pubkey).unwrap());
+    }
+
+    #[test]
+    fn test_store_account_and_update_capitalization_increased() {
+        let old_lamports = 400;
+        let (genesis_config, mint_keypair) = create_genesis_config(old_lamports);
+        let bank = Bank::new(&genesis_config);
+        let pubkey = mint_keypair.pubkey();
+
+        let new_lamports = 500;
+        let account = Account::new(new_lamports, 0, &system_program::id());
+
+        assert_capitalization_diff(
+            &bank,
+            || bank.store_account_and_update_capitalization(&pubkey, &account),
+            |old, new| assert_eq!(old + 100, new),
+        );
+        assert_eq!(account, bank.get_account(&pubkey).unwrap());
+    }
+
+    #[test]
+    fn test_store_account_and_update_capitalization_decreased() {
+        let old_lamports = 400;
+        let (genesis_config, mint_keypair) = create_genesis_config(old_lamports);
+        let bank = Bank::new(&genesis_config);
+        let pubkey = mint_keypair.pubkey();
+
+        let new_lamports = 100;
+        let account = Account::new(new_lamports, 0, &system_program::id());
+
+        assert_capitalization_diff(
+            &bank,
+            || bank.store_account_and_update_capitalization(&pubkey, &account),
+            |old, new| assert_eq!(old - 300, new),
+        );
+        assert_eq!(account, bank.get_account(&pubkey).unwrap());
+    }
+
+    #[test]
+    fn test_store_account_and_update_capitalization_unchanged() {
+        let lamports = 400;
+        let (genesis_config, mint_keypair) = create_genesis_config(lamports);
+        let bank = Bank::new(&genesis_config);
+        let pubkey = mint_keypair.pubkey();
+
+        let account = Account::new(lamports, 1, &system_program::id());
+
+        assert_capitalization_diff(
+            &bank,
+            || bank.store_account_and_update_capitalization(&pubkey, &account),
+            |old, new| assert_eq!(old, new),
+        );
+        assert_eq!(account, bank.get_account(&pubkey).unwrap());
+    }
+
     #[test]
     fn test_rent_distribution() {
         solana_logger::setup();
@@ -5291,11 +5373,11 @@ pub(crate) mod tests {
 
         let payer = Keypair::new();
         let payer_account = Account::new(400, 0, &system_program::id());
-        bank.add_account_and_update_capitalization(&payer.pubkey(), &payer_account);
+        bank.store_account_and_update_capitalization(&payer.pubkey(), &payer_account);
 
         let payee = Keypair::new();
         let payee_account = Account::new(70, 1, &system_program::id());
-        bank.add_account_and_update_capitalization(&payee.pubkey(), &payee_account);
+        bank.store_account_and_update_capitalization(&payee.pubkey(), &payee_account);
 
         let bootstrap_validator_initial_balance = bank.get_balance(&bootstrap_validator_pubkey);
 
@@ -6459,7 +6541,7 @@ pub(crate) mod tests {
             crate::stakes::tests::create_staked_node_accounts(1_0000);
 
         // set up accounts
-        bank.add_account_and_update_capitalization(&stake_id, &stake_account);
+        bank.store_account_and_update_capitalization(&stake_id, &stake_account);
 
         // generate some rewards
         let mut vote_state = Some(VoteState::from(&vote_account).unwrap());
@@ -6469,7 +6551,7 @@ pub(crate) mod tests {
             }
             let versioned = VoteStateVersions::Current(Box::new(vote_state.take().unwrap()));
             VoteState::to(&versioned, &mut vote_account).unwrap();
-            bank.add_account_and_update_capitalization(&vote_id, &vote_account);
+            bank.store_account_and_update_capitalization(&vote_id, &vote_account);
             match versioned {
                 VoteStateVersions::Current(v) => {
                     vote_state = Some(*v);
@@ -6477,7 +6559,7 @@ pub(crate) mod tests {
                 _ => panic!("Has to be of type Current"),
             };
         }
-        bank.add_account_and_update_capitalization(&vote_id, &vote_account);
+        bank.store_account_and_update_capitalization(&vote_id, &vote_account);
 
         let validator_points: u128 = bank
             .stake_delegation_accounts(&mut null_tracer())
@@ -6581,8 +6663,8 @@ pub(crate) mod tests {
         let (stake_id2, stake_account2) = crate::stakes::tests::create_stake_account(456, &vote_id);
 
         // set up accounts
-        bank.add_account_and_update_capitalization(&stake_id1, &stake_account1);
-        bank.add_account_and_update_capitalization(&stake_id2, &stake_account2);
+        bank.store_account_and_update_capitalization(&stake_id1, &stake_account1);
+        bank.store_account_and_update_capitalization(&stake_id2, &stake_account2);
 
         // generate some rewards
         let mut vote_state = Some(VoteState::from(&vote_account).unwrap());
@@ -6592,7 +6674,7 @@ pub(crate) mod tests {
             }
             let versioned = VoteStateVersions::Current(Box::new(vote_state.take().unwrap()));
             VoteState::to(&versioned, &mut vote_account).unwrap();
-            bank.add_account_and_update_capitalization(&vote_id, &vote_account);
+            bank.store_account_and_update_capitalization(&vote_id, &vote_account);
             match versioned {
                 VoteStateVersions::Current(v) => {
                     vote_state = Some(*v);
@@ -6600,7 +6682,7 @@ pub(crate) mod tests {
                 _ => panic!("Has to be of type Current"),
             };
         }
-        bank.add_account_and_update_capitalization(&vote_id, &vote_account);
+        bank.store_account_and_update_capitalization(&vote_id, &vote_account);
 
         // put a child bank in epoch 1, which calls update_rewards()...
         let bank1 = Bank::new_from_parent(
@@ -10329,7 +10411,7 @@ pub(crate) mod tests {
         let mut bank = Bank::new(&genesis_config);
 
         // Setup a simulated account
-        bank.add_account_and_update_capitalization(
+        bank.store_account_and_update_capitalization(
             &inline_spl_token_v2_0::id(),
             &Account {
                 lamports: 100,
@@ -10691,7 +10773,7 @@ pub(crate) mod tests {
 
         let zero_lamport_pubkey = solana_sdk::pubkey::new_rand();
 
-        bank1.add_account_and_update_capitalization(
+        bank1.store_account_and_update_capitalization(
             &zero_lamport_pubkey,
             &Account::new(0, 0, &Pubkey::default()),
         );
@@ -10700,7 +10782,7 @@ pub(crate) mod tests {
         // not cleaned up after clean is called, so that the bank hash still exists
         // when we call rehash() later in this test.
         let large_account_pubkey = solana_sdk::pubkey::new_rand();
-        bank1.add_account_and_update_capitalization(
+        bank1.store_account_and_update_capitalization(
             &large_account_pubkey,
             &Account::new(
                 1000,

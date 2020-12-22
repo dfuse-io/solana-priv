@@ -36,6 +36,9 @@ use std::{
 };
 use thiserror::Error as ThisError;
 
+/// Maximum signers
+pub const MAX_SIGNERS: usize = 16;
+
 /// Error definitions
 #[derive(Debug, ThisError, PartialEq)]
 pub enum SyscallError {
@@ -59,6 +62,8 @@ pub enum SyscallError {
     PrivilegeEscalation,
     #[error("Unaligned pointer")]
     UnalignedPointer,
+    #[error("Too many signers")]
+    TooManySigners,
 }
 impl From<SyscallError> for EbpfError<BPFError> {
     fn from(error: SyscallError) -> Self {
@@ -829,8 +834,8 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedRust<'a> {
                 ro_regions,
                 self.loader_id
             )?;
-            if signers_seeds.len() > MAX_SEEDS {
-                return Err(SyscallError::BadSeeds(PubkeyError::MaxSeedLengthExceeded).into());
+            if signers_seeds.len() > MAX_SIGNERS {
+                return Err(SyscallError::TooManySigners.into());
             }
             for signer_seeds in signers_seeds.iter() {
                 let untranslated_seeds = translate_slice!(
@@ -840,6 +845,12 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedRust<'a> {
                     ro_regions,
                     self.loader_id
                 )?;
+                if untranslated_seeds.len() > MAX_SEEDS {
+                    return Err(SyscallError::InstructionError(
+                        InstructionError::MaxSeedLengthExceeded,
+                    )
+                    .into());
+                }
                 let seeds = untranslated_seeds
                     .iter()
                     .map(|untranslated_seed| {
@@ -1004,7 +1015,6 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedC<'a> {
             ro_regions,
             self.loader_id
         )?;
-        let first_info_addr = &account_infos[0] as *const _ as u64;
         let mut accounts = Vec::with_capacity(message.account_keys.len());
         let mut refs = Vec::with_capacity(message.account_keys.len());
         'root: for account_key in message.account_keys.iter() {
@@ -1032,6 +1042,7 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedC<'a> {
                         self.loader_id
                     )?;
 
+                    let first_info_addr = &account_infos[0] as *const _ as u64;
                     let addr = &account_info.data_len as *const u64 as u64;
                     let vm_addr = account_infos_addr + (addr - first_info_addr);
                     let _ =
@@ -1085,8 +1096,8 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedC<'a> {
                 ro_regions,
                 self.loader_id
             )?;
-            if signers_seeds.len() > MAX_SEEDS {
-                return Err(SyscallError::BadSeeds(PubkeyError::MaxSeedLengthExceeded).into());
+            if signers_seeds.len() > MAX_SIGNERS {
+                return Err(SyscallError::TooManySigners.into());
             }
             Ok(signers_seeds
                 .iter()
@@ -1098,6 +1109,12 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedC<'a> {
                         ro_regions,
                         self.loader_id
                     )?;
+                    if seeds.len() > MAX_SEEDS {
+                        return Err(SyscallError::InstructionError(
+                            InstructionError::MaxSeedLengthExceeded,
+                        )
+                        .into());
+                    }
                     let seeds_bytes = seeds
                         .iter()
                         .map(|seed| {
