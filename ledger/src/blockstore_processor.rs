@@ -16,18 +16,18 @@ use solana_metrics::{datapoint_error, inc_new_counter_debug};
 use solana_rayon_threadlimit::get_thread_count;
 use solana_runtime::{
     bank::{
-        Bank, InnerInstructionsList, TransactionBalancesSet, TransactionLogMessages,
-        TransactionProcessResult, TransactionResults,
+        Bank, InnerInstructionsList, TransactionBalancesSet, TransactionExecutionResult,
+        TransactionLogMessages, TransactionResults,
     },
     bank_forks::BankForks,
     bank_utils,
     commitment::VOTE_THRESHOLD_SIZE,
     transaction_batch::TransactionBatch,
     transaction_utils::OrderedIterator,
+    vote_account::ArcVoteAccount,
     vote_sender_types::ReplayVoteSender,
 };
 use solana_sdk::{
-    account::Account,
     clock::{Slot, MAX_PROCESSING_AGE},
     genesis_config::GenesisConfig,
     hash::Hash,
@@ -36,7 +36,6 @@ use solana_sdk::{
     timing::duration_as_ms,
     transaction::{Result, Transaction, TransactionError},
 };
-use solana_vote_program::vote_state::VoteState;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -116,7 +115,7 @@ fn execute_batch(
 
     let TransactionResults {
         fee_collection_results,
-        processing_results,
+        execution_results,
         ..
     } = tx_results;
 
@@ -125,7 +124,7 @@ fn execute_batch(
             bank.clone(),
             batch.transactions(),
             batch.iteration_order_vec(),
-            processing_results,
+            execution_results,
             balances,
             inner_instructions,
             transaction_logs,
@@ -924,8 +923,11 @@ fn load_frozen_forks(
         // for newer cluster confirmed roots
         let new_root_bank = {
             if *root == max_root {
-                supermajority_root_from_vote_accounts(bank.slot(), bank.total_epoch_stake(), bank.vote_accounts()
-                .into_iter()).and_then(|supermajority_root| {
+                supermajority_root_from_vote_accounts(
+                    bank.slot(),
+                    bank.total_epoch_stake(),
+                    bank.vote_accounts(),
+                ).and_then(|supermajority_root| {
                     if supermajority_root > *root {
                         // If there's a cluster confirmed root greater than our last
                         // replayed root, then beccause the cluster confirmed root should
@@ -1016,30 +1018,28 @@ fn supermajority_root(roots: &[(Slot, u64)], total_epoch_stake: u64) -> Option<S
 fn supermajority_root_from_vote_accounts<I>(
     bank_slot: Slot,
     total_epoch_stake: u64,
-    vote_accounts_iter: I,
+    vote_accounts: I,
 ) -> Option<Slot>
 where
-    I: Iterator<Item = (Pubkey, (u64, Account))>,
+    I: IntoIterator<Item = (Pubkey, (u64, ArcVoteAccount))>,
 {
-    let mut roots_stakes: Vec<(Slot, u64)> = vote_accounts_iter
+    let mut roots_stakes: Vec<(Slot, u64)> = vote_accounts
+        .into_iter()
         .filter_map(|(key, (stake, account))| {
             if stake == 0 {
                 return None;
             }
 
-            let vote_state = VoteState::from(&account);
-            if vote_state.is_none() {
-                warn!(
-                    "Unable to get vote_state from account {} in bank: {}",
-                    key, bank_slot
-                );
-                return None;
+            match account.vote_state().as_ref() {
+                Err(_) => {
+                    warn!(
+                        "Unable to get vote_state from account {} in bank: {}",
+                        key, bank_slot
+                    );
+                    None
+                }
+                Ok(vote_state) => vote_state.root_slot.map(|root_slot| (root_slot, stake)),
             }
-
-            vote_state
-                .unwrap()
-                .root_slot
-                .map(|root_slot| (root_slot, stake))
         })
         .collect();
 
@@ -1087,7 +1087,7 @@ pub struct TransactionStatusBatch {
     pub bank: Arc<Bank>,
     pub transactions: Vec<Transaction>,
     pub iteration_order: Option<Vec<usize>>,
-    pub statuses: Vec<TransactionProcessResult>,
+    pub statuses: Vec<TransactionExecutionResult>,
     pub balances: TransactionBalancesSet,
     pub inner_instructions: Vec<Option<InnerInstructionsList>>,
     pub transaction_logs: Vec<TransactionLogMessages>,
@@ -1099,7 +1099,7 @@ pub fn send_transaction_status_batch(
     bank: Arc<Bank>,
     transactions: &[Transaction],
     iteration_order: Option<Vec<usize>>,
-    statuses: Vec<TransactionProcessResult>,
+    statuses: Vec<TransactionExecutionResult>,
     balances: TransactionBalancesSet,
     inner_instructions: Vec<Option<InnerInstructionsList>>,
     transaction_logs: Vec<TransactionLogMessages>,
@@ -1170,6 +1170,7 @@ pub mod tests {
         self, create_genesis_config_with_vote_accounts, ValidatorVoteKeypairs,
     };
     use solana_sdk::{
+        account::Account,
         epoch_schedule::EpochSchedule,
         hash::Hash,
         pubkey::Pubkey,
@@ -1180,7 +1181,7 @@ pub mod tests {
     };
     use solana_vote_program::{
         self,
-        vote_state::{VoteStateVersions, MAX_LOCKOUT_HISTORY},
+        vote_state::{VoteState, VoteStateVersions, MAX_LOCKOUT_HISTORY},
         vote_transaction,
     };
     use std::{collections::BTreeSet, sync::RwLock};
@@ -3204,7 +3205,7 @@ pub mod tests {
     #[test]
     fn test_supermajority_root_from_vote_accounts() {
         let convert_to_vote_accounts =
-            |roots_stakes: Vec<(Slot, u64)>| -> Vec<(Pubkey, (u64, Account))> {
+            |roots_stakes: Vec<(Slot, u64)>| -> Vec<(Pubkey, (u64, ArcVoteAccount))> {
                 roots_stakes
                     .into_iter()
                     .map(|(root, stake)| {
@@ -3214,7 +3215,10 @@ pub mod tests {
                             Account::new(1, VoteState::size_of(), &solana_vote_program::id());
                         let versioned = VoteStateVersions::Current(Box::new(vote_state));
                         VoteState::serialize(&versioned, &mut vote_account.data).unwrap();
-                        (solana_sdk::pubkey::new_rand(), (stake, vote_account))
+                        (
+                            solana_sdk::pubkey::new_rand(),
+                            (stake, ArcVoteAccount::from(vote_account)),
+                        )
                     })
                     .collect_vec()
             };

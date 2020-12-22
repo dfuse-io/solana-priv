@@ -299,6 +299,7 @@ fn graph_forks(bank_forks: &BankForks, include_all_votes: bool) -> String {
 
     // Search all forks and collect the last vote made by each validator
     let mut last_votes = HashMap::new();
+    let default_vote_state = VoteState::default();
     for fork_slot in &fork_slots {
         let bank = &bank_forks[*fork_slot];
 
@@ -308,7 +309,8 @@ fn graph_forks(bank_forks: &BankForks, include_all_votes: bool) -> String {
             .map(|(_, (stake, _))| stake)
             .sum();
         for (_, (stake, vote_account)) in bank.vote_accounts() {
-            let vote_state = VoteState::from(&vote_account).unwrap_or_default();
+            let vote_state = vote_account.vote_state();
+            let vote_state = vote_state.as_ref().unwrap_or(&default_vote_state);
             if let Some(last_vote) = vote_state.votes.iter().last() {
                 let entry = last_votes.entry(vote_state.node_pubkey).or_insert((
                     last_vote.slot,
@@ -317,7 +319,7 @@ fn graph_forks(bank_forks: &BankForks, include_all_votes: bool) -> String {
                     total_stake,
                 ));
                 if entry.0 < last_vote.slot {
-                    *entry = (last_vote.slot, vote_state, stake, total_stake);
+                    *entry = (last_vote.slot, vote_state.clone(), stake, total_stake);
                 }
             }
         }
@@ -348,7 +350,8 @@ fn graph_forks(bank_forks: &BankForks, include_all_votes: bool) -> String {
         let mut first = true;
         loop {
             for (_, (_, vote_account)) in bank.vote_accounts() {
-                let vote_state = VoteState::from(&vote_account).unwrap_or_default();
+                let vote_state = vote_account.vote_state();
+                let vote_state = vote_state.as_ref().unwrap_or(&default_vote_state);
                 if let Some(last_vote) = vote_state.votes.iter().last() {
                     let validator_votes = all_votes.entry(vote_state.node_pubkey).or_default();
                     validator_votes
@@ -2334,6 +2337,8 @@ fn main() {
                                 if let Some(ref mut csv_writer) = csv_writer {
                                     #[derive(Serialize)]
                                     struct InflationRecord {
+                                        cluster_type: String,
+                                        rewarded_epoch: Epoch,
                                         account: String,
                                         owner: String,
                                         old_balance: u64,
@@ -2359,6 +2364,8 @@ fn main() {
                                         commission: String,
                                         cluster_rewards: String,
                                         cluster_points: String,
+                                        old_capitalization: u64,
+                                        new_capitalization: u64,
                                     };
                                     fn format_or_na<T: std::fmt::Display>(
                                         data: Option<T>,
@@ -2377,6 +2384,8 @@ fn main() {
 
                                     for point_detail in point_details {
                                         let record = InflationRecord {
+                                            cluster_type: format!("{:?}", base_bank.cluster_type()),
+                                            rewarded_epoch: base_bank.epoch(),
                                             account: format!("{}", pubkey),
                                             owner: format!("{}", base_account.owner),
                                             old_balance: base_account.lamports,
@@ -2439,6 +2448,8 @@ fn main() {
                                             cluster_points: format_or_na(
                                                 last_point_value.as_ref().map(|pv| pv.points),
                                             ),
+                                            old_capitalization: base_bank.capitalization(),
+                                            new_capitalization: warped_bank.capitalization(),
                                         };
                                         csv_writer.serialize(&record).unwrap();
                                     }

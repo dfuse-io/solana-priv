@@ -6,7 +6,6 @@ use crate::{
         bank_from_stream, bank_to_stream, SerdeStyle, SnapshotStorage, SnapshotStorages,
     },
     snapshot_package::{AccountsPackage, AccountsPackageSendError, AccountsPackageSender},
-    status_cache::MAX_CACHE_ENTRIES,
 };
 use bincode::{config::Options, serialize_into};
 use bzip2::bufread::BzDecoder;
@@ -41,9 +40,11 @@ pub const TAR_SNAPSHOTS_DIR: &str = "snapshots";
 pub const TAR_ACCOUNTS_DIR: &str = "accounts";
 pub const TAR_VERSION_FILE: &str = "version";
 
+pub const MAX_SNAPSHOTS: usize = 8; // Save some snapshots but not too many
 const MAX_SNAPSHOT_DATA_FILE_SIZE: u64 = 32 * 1024 * 1024 * 1024; // 32 GiB
 const VERSION_STRING_V1_2_0: &str = "1.2.0";
 const DEFAULT_SNAPSHOT_VERSION: SnapshotVersion = SnapshotVersion::V1_2_0;
+const TMP_SNAPSHOT_DIR_PREFIX: &str = "tmp-snapshot-";
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum SnapshotVersion {
@@ -170,7 +171,9 @@ pub fn package_snapshot<P: AsRef<Path>, Q: AsRef<Path>>(
     snapshot_version: SnapshotVersion,
 ) -> Result<AccountsPackage> {
     // Hard link all the snapshots we need for this package
-    let snapshot_hard_links_dir = tempfile::tempdir_in(snapshot_path)?;
+    let snapshot_hard_links_dir = tempfile::Builder::new()
+        .prefix(TMP_SNAPSHOT_DIR_PREFIX)
+        .tempdir_in(snapshot_path)?;
 
     // Create a snapshot package
     info!(
@@ -213,6 +216,25 @@ fn get_compression_ext(compression: &CompressionType) -> &'static str {
     }
 }
 
+// If the validator is halted in the middle of `archive_snapshot_package` the temporary staging directory
+// won't be cleaned up.  Call this function to clean them up
+pub fn remove_tmp_snapshot_archives(snapshot_path: &Path) {
+    if let Ok(entries) = fs::read_dir(&snapshot_path) {
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            if entry
+                .file_name()
+                .into_string()
+                .unwrap_or_else(|_| String::new())
+                .starts_with(TMP_SNAPSHOT_DIR_PREFIX)
+            {
+                fs::remove_dir_all(entry.path()).unwrap_or_else(|err| {
+                    warn!("Failed to remove {}: {}", entry.path().display(), err)
+                });
+            }
+        }
+    }
+}
+
 pub fn archive_snapshot_package(snapshot_package: &AccountsPackage) -> Result<()> {
     info!(
         "Generating snapshot archive for slot {}",
@@ -234,7 +256,10 @@ pub fn archive_snapshot_package(snapshot_package: &AccountsPackage) -> Result<()
     fs::create_dir_all(tar_dir)?;
 
     // Create the staging directories
-    let staging_dir = tempfile::tempdir_in(tar_dir)?;
+    let staging_dir = tempfile::Builder::new()
+        .prefix(TMP_SNAPSHOT_DIR_PREFIX)
+        .tempdir_in(tar_dir)?;
+
     let staging_accounts_dir = staging_dir.path().join(TAR_ACCOUNTS_DIR);
     let staging_snapshots_dir = staging_dir.path().join(TAR_SNAPSHOTS_DIR);
     let staging_version_file = staging_dir.path().join(TAR_VERSION_FILE);
@@ -580,8 +605,10 @@ pub fn bank_from_archive<P: AsRef<Path>>(
     debug_keys: Option<Arc<HashSet<Pubkey>>>,
     additional_builtins: Option<&Builtins>,
 ) -> Result<Bank> {
-    // Untar the snapshot into a temp directory under `snapshot_config.snapshot_path()`
-    let unpack_dir = tempfile::tempdir_in(snapshot_path)?;
+    // Untar the snapshot into a temporary directory
+    let unpack_dir = tempfile::Builder::new()
+        .prefix(TMP_SNAPSHOT_DIR_PREFIX)
+        .tempdir_in(snapshot_path)?;
     untar_snapshot_in(&snapshot_tar, &unpack_dir, compression)?;
 
     let mut measure = Measure::start("bank rebuild from snapshot");
@@ -855,7 +882,7 @@ pub fn verify_snapshot_archive<P, Q, R>(
 pub fn purge_old_snapshots(snapshot_path: &Path) {
     // Remove outdated snapshots
     let slot_snapshot_paths = get_snapshot_paths(snapshot_path);
-    let num_to_remove = slot_snapshot_paths.len().saturating_sub(MAX_CACHE_ENTRIES);
+    let num_to_remove = slot_snapshot_paths.len().saturating_sub(MAX_SNAPSHOTS);
     for slot_files in &slot_snapshot_paths[..num_to_remove] {
         let r = remove_snapshot(slot_files.slot, snapshot_path);
         if r.is_err() {
@@ -885,8 +912,7 @@ pub fn snapshot_bank(
     let latest_slot_snapshot_paths = slot_snapshot_paths
         .last()
         .expect("no snapshots found in config snapshot_path");
-    // We only care about the last bank's snapshot.
-    // We'll ask the bank for MAX_CACHE_ENTRIES (on the rooted path) worth of statuses
+
     let package = package_snapshot(
         &root_bank,
         latest_slot_snapshot_paths,

@@ -23,7 +23,7 @@ use solana_sdk::{
     message::Message,
     process_instruction::{stable_log, ComputeMeter, InvokeContext, Logger},
     program_error::ProgramError,
-    pubkey::{Pubkey, PubkeyError},
+    pubkey::{Pubkey, PubkeyError, MAX_SEEDS},
 };
 use std::{
     alloc::Layout,
@@ -534,6 +534,9 @@ impl<'a> SyscallObject<BPFError> for SyscallCreateProgramAddress<'a> {
         // TODO need ref?
         let untranslated_seeds =
             translate_slice!(&[&u8], seeds_addr, seeds_len, ro_regions, self.loader_id)?;
+        if untranslated_seeds.len() > MAX_SEEDS {
+            return Ok(1);
+        }
         let seeds = untranslated_seeds
             .iter()
             .map(|untranslated_seed| {
@@ -548,9 +551,7 @@ impl<'a> SyscallObject<BPFError> for SyscallCreateProgramAddress<'a> {
             .collect::<Result<Vec<_>, EbpfError<BPFError>>>()?;
         let program_id = translate_type!(Pubkey, program_id_addr, ro_regions, self.loader_id)?;
 
-        let new_address = match Pubkey::create_program_address(&seeds, program_id)
-            .map_err(SyscallError::BadSeeds)
-        {
+        let new_address = match Pubkey::create_program_address(&seeds, program_id) {
             Ok(address) => address,
             Err(_) => return Ok(1),
         };
@@ -751,7 +752,7 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedRust<'a> {
                     let owner = translate_type_mut!(
                         Pubkey,
                         account_info.owner as *const _,
-                        ro_regions,
+                        rw_regions,
                         self.loader_id
                     )?;
                     let (data, ref_to_len_in_vm, serialized_len_ptr) = {
@@ -762,10 +763,13 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedRust<'a> {
                             ro_regions,
                             self.loader_id
                         )?;
-                        let translated =
-                            translate!(account_info.data.as_ptr(), 8, ro_regions, self.loader_id)?
-                                as *mut u64;
-                        let ref_to_len_in_vm = unsafe { &mut *translated.offset(1) };
+                        let translated = translate!(
+                            unsafe { (account_info.data.as_ptr() as *const u64).offset(1) as u64 },
+                            8,
+                            rw_regions,
+                            self.loader_id
+                        )? as *mut u64;
+                        let ref_to_len_in_vm = unsafe { &mut *translated };
                         let ref_of_len_in_input_buffer = unsafe { data.as_ptr().offset(-8) };
                         let serialized_len_ptr = translate_type_mut!(
                             u64,
@@ -825,6 +829,9 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedRust<'a> {
                 ro_regions,
                 self.loader_id
             )?;
+            if signers_seeds.len() > MAX_SEEDS {
+                return Err(SyscallError::BadSeeds(PubkeyError::MaxSeedLengthExceeded).into());
+            }
             for signer_seeds in signers_seeds.iter() {
                 let untranslated_seeds = translate_slice!(
                     &[u8],
@@ -997,6 +1004,7 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedC<'a> {
             ro_regions,
             self.loader_id
         )?;
+        let first_info_addr = &account_infos[0] as *const _ as u64;
         let mut accounts = Vec::with_capacity(message.account_keys.len());
         let mut refs = Vec::with_capacity(message.account_keys.len());
         'root: for account_key in message.account_keys.iter() {
@@ -1013,7 +1021,7 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedC<'a> {
                     let owner = translate_type_mut!(
                         Pubkey,
                         account_info.owner_addr,
-                        ro_regions,
+                        rw_regions,
                         self.loader_id
                     )?;
                     let data = translate_slice_mut!(
@@ -1023,8 +1031,13 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedC<'a> {
                         rw_regions,
                         self.loader_id
                     )?;
-                    let ref_to_len_in_vm =
-                        unsafe { &mut *(&account_info.data_len as *const u64 as u64 as *mut u64) };
+
+                    let addr = &account_info.data_len as *const u64 as u64;
+                    let vm_addr = account_infos_addr + (addr - first_info_addr);
+                    let _ =
+                        translate!(vm_addr, size_of::<u64>() as u64, rw_regions, self.loader_id)?;
+                    let ref_to_len_in_vm = unsafe { &mut *(addr as *mut u64) };
+
                     let ref_of_len_in_input_buffer =
                         unsafe { (account_info.data_addr as *mut u8).offset(-8) };
                     let serialized_len_ptr = translate_type_mut!(
@@ -1072,6 +1085,9 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedC<'a> {
                 ro_regions,
                 self.loader_id
             )?;
+            if signers_seeds.len() > MAX_SEEDS {
+                return Err(SyscallError::BadSeeds(PubkeyError::MaxSeedLengthExceeded).into());
+            }
             Ok(signers_seeds
                 .iter()
                 .map(|signer_seeds| {
@@ -1155,6 +1171,20 @@ fn verify_instruction<'a>(
             return Err(SyscallError::PrivilegeEscalation.into());
         }
     }
+
+    // validate the caller has access to the program account
+    let _ = callers_keyed_accounts
+        .iter()
+        .find_map(|keyed_account| {
+            if &instruction.program_id == keyed_account.unsigned_key() {
+                Some(keyed_account)
+            } else {
+                None
+            }
+        })
+        .ok_or(SyscallError::InstructionError(
+            InstructionError::MissingAccount,
+        ))?;
 
     Ok(())
 }
