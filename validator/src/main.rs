@@ -870,6 +870,12 @@ pub fn main() {
         PubSubConfig::default().max_in_buffer_capacity.to_string();
     let default_rpc_pubsub_max_out_buffer_capacity =
         PubSubConfig::default().max_out_buffer_capacity.to_string();
+    let default_rpc_send_transaction_retry_ms = ValidatorConfig::default()
+        .send_transaction_retry_ms
+        .to_string();
+    let default_rpc_send_transaction_leader_forward_count = ValidatorConfig::default()
+        .send_transaction_leader_forward_count
+        .to_string();
 
     let matches = App::new(crate_name!()).about(crate_description!())
         .version(solana_version::version!())
@@ -1083,7 +1089,16 @@ pub fn main() {
                 .long("accounts")
                 .value_name("PATHS")
                 .takes_value(true)
+                .multiple(true)
                 .help("Comma separated persistent accounts location"),
+        )
+        .arg(
+            Arg::with_name("account_shrink_path")
+                .long("account-shrink-path")
+                .value_name("PATH")
+                .takes_value(true)
+                .multiple(true)
+                .help("Path to accounts shrink path which can hold a compacted account set."),
         )
         .arg(
             Arg::with_name("gossip_port")
@@ -1207,6 +1222,7 @@ pub fn main() {
                 .long("expected-shred-version")
                 .value_name("VERSION")
                 .takes_value(true)
+                .validator(is_parsable::<u16>)
                 .help("Require the shred version be this value"),
         )
         .arg(
@@ -1350,6 +1366,24 @@ pub fn main() {
                 .validator(is_parsable::<usize>)
                 .default_value(&default_rpc_pubsub_max_out_buffer_capacity)
                 .help("The maximum size in bytes to which the outgoing websocket buffer can grow."),
+        )
+        .arg(
+            Arg::with_name("rpc_send_transaction_retry_ms")
+                .long("rpc-send-retry-ms")
+                .value_name("MILLISECS")
+                .takes_value(true)
+                .validator(is_parsable::<u64>)
+                .default_value(&default_rpc_send_transaction_retry_ms)
+                .help("The rate at which transactions sent via rpc service are retried."),
+        )
+        .arg(
+            Arg::with_name("rpc_send_transaction_leader_forward_count")
+                .long("rpc-send-leader-count")
+                .value_name("NUMBER")
+                .takes_value(true)
+                .validator(is_parsable::<u64>)
+                .default_value(&default_rpc_send_transaction_leader_forward_count)
+                .help("The number of upcoming leaders to which to forward transactions sent via rpc service."),
         )
         .arg(
             Arg::with_name("halt_on_trusted_validators_accounts_hash_mismatch")
@@ -1554,6 +1588,12 @@ pub fn main() {
         wal_recovery_mode,
         poh_verify: !matches.is_present("skip_poh_verify"),
         debug_keys,
+        send_transaction_retry_ms: value_t_or_exit!(matches, "rpc_send_transaction_retry_ms", u64),
+        send_transaction_leader_forward_count: value_t_or_exit!(
+            matches,
+            "rpc_send_transaction_leader_forward_count",
+            u64
+        ),
         ..ValidatorConfig::default()
     };
 
@@ -1569,11 +1609,20 @@ pub fn main() {
         solana_net_utils::parse_port_range(matches.value_of("dynamic_port_range").unwrap())
             .expect("invalid dynamic_port_range");
 
-    let account_paths = if let Some(account_paths) = matches.value_of("account_paths") {
-        account_paths.split(',').map(PathBuf::from).collect()
-    } else {
-        vec![ledger_path.join("accounts")]
-    };
+    let account_paths: Vec<PathBuf> =
+        if let Ok(account_paths) = values_t!(matches, "account_paths", String) {
+            account_paths
+                .join(",")
+                .split(',')
+                .map(PathBuf::from)
+                .collect()
+        } else {
+            vec![ledger_path.join("accounts")]
+        };
+    let account_shrink_paths: Option<Vec<PathBuf>> =
+        values_t!(matches, "account_shrink_path", String)
+            .map(|shrink_paths| shrink_paths.into_iter().map(PathBuf::from).collect())
+            .ok();
 
     // Create and canonicalize account paths to avoid issues with symlink creation
     validator_config.account_paths = account_paths
@@ -1591,6 +1640,26 @@ pub fn main() {
             }
         })
         .collect();
+
+    validator_config.account_shrink_paths = account_shrink_paths.map(|paths| {
+        paths
+            .into_iter()
+            .map(|account_path| {
+                match fs::create_dir_all(&account_path)
+                    .and_then(|_| fs::canonicalize(&account_path))
+                {
+                    Ok(account_path) => account_path,
+                    Err(err) => {
+                        eprintln!(
+                            "Unable to access account path: {:?}, err: {:?}",
+                            account_path, err
+                        );
+                        exit(1);
+                    }
+                }
+            })
+            .collect()
+    });
 
     let snapshot_interval_slots = value_t_or_exit!(matches, "snapshot_interval_slots", u64);
     let maximum_local_snapshot_age = value_t_or_exit!(matches, "maximum_local_snapshot_age", u64);
