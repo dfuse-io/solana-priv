@@ -406,15 +406,71 @@ pub type InnerInstructionsList = Vec<InnerInstructions>;
 /// A list of log messages emitted during a transaction
 pub type TransactionLogMessages = Vec<String>;
 
+#[derive(Serialize, Deserialize, AbiExample, AbiEnumVisitor, Debug, PartialEq)]
+pub enum TransactionLogCollectorFilter {
+    All,
+    AllWithVotes,
+    None,
+    OnlyMentionedAddresses,
+}
+
+impl Default for TransactionLogCollectorFilter {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+#[derive(AbiExample, Debug, Default)]
+pub struct TransactionLogCollectorConfig {
+    pub mentioned_addresses: HashSet<Pubkey>,
+    pub filter: TransactionLogCollectorFilter,
+}
+
+#[derive(AbiExample, Clone, Debug)]
+pub struct TransactionLogInfo {
+    pub signature: Signature,
+    pub result: Result<()>,
+    pub is_vote: bool,
+    pub log_messages: TransactionLogMessages,
+}
+
+#[derive(AbiExample, Default, Debug)]
+pub struct TransactionLogCollector {
+    // All the logs collected for from this Bank.  Exact contents depend on the
+    // active `TransactionLogCollectorFilter`
+    pub logs: Vec<TransactionLogInfo>,
+
+    // For each `mentioned_addresses`, maintain a list of indicies into `logs` to easily
+    // locate the logs from transactions that included the mentioned addresses.
+    pub mentioned_address_map: HashMap<Pubkey, Vec<usize>>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HashAgeKind {
     Extant,
-    DurableNonce(Pubkey, Account),
+    DurableNoncePartial(Pubkey, Account),
+    DurableNonceFull(Pubkey, Account, Option<Account>),
 }
 
 impl HashAgeKind {
     pub fn is_durable_nonce(&self) -> bool {
-        matches!(self, HashAgeKind::DurableNonce(_, _))
+        match self {
+            Self::Extant => false,
+            Self::DurableNoncePartial(_, _) => true,
+            Self::DurableNonceFull(_, _, _) => true,
+        }
+    }
+
+    pub fn fee_calculator(&self) -> Option<Option<FeeCalculator>> {
+        match self {
+            Self::Extant => None,
+            Self::DurableNoncePartial(_, account) => {
+                Some(nonce_account::fee_calculator_of(account))
+            }
+            Self::DurableNonceFull(_, account, _) => {
+                Some(nonce_account::fee_calculator_of(account))
+            }
+        }
     }
 }
 
@@ -709,6 +765,13 @@ pub struct Bank {
 
     transaction_debug_keys: Option<Arc<HashSet<Pubkey>>>,
 
+    // Global configuration for how transaction logs should be collected across all banks
+    pub transaction_log_collector_config: Arc<RwLock<TransactionLogCollectorConfig>>,
+
+    // Logs from transactions that this Bank executed collected according to the criteria in
+    // `transaction_log_collector_config`
+    pub transaction_log_collector: Arc<RwLock<TransactionLogCollector>>,
+
     pub feature_set: Arc<FeatureSet>,
 }
 
@@ -853,6 +916,8 @@ impl Bank {
             rewards_pool_pubkeys: parent.rewards_pool_pubkeys.clone(),
             cached_executors: RwLock::new((*parent.cached_executors.read().unwrap()).clone()),
             transaction_debug_keys: parent.transaction_debug_keys.clone(),
+            transaction_log_collector_config: parent.transaction_log_collector_config.clone(),
+            transaction_log_collector: Arc::new(RwLock::new(TransactionLogCollector::default())),
             feature_set: parent.feature_set.clone(),
         };
 
@@ -969,6 +1034,8 @@ impl Bank {
                 CachedExecutors::new(MAX_CACHED_EXECUTORS),
             )))),
             transaction_debug_keys: debug_keys,
+            transaction_log_collector_config: new(),
+            transaction_log_collector: new(),
             feature_set: new(),
         };
         bank.finish_init(genesis_config, additional_builtins);
@@ -2102,7 +2169,10 @@ impl Bank {
     }
 
     /// Run transactions against a frozen bank without committing the results
-    pub fn simulate_transaction(&self, transaction: Transaction) -> (Result<()>, Vec<String>) {
+    pub fn simulate_transaction(
+        &self,
+        transaction: Transaction,
+    ) -> (Result<()>, TransactionLogMessages) {
         assert!(self.is_frozen(), "simulation bank must be frozen");
 
         let txs = &[transaction];
@@ -2112,7 +2182,7 @@ impl Bank {
             _loaded_accounts,
             executed,
             _inner_instructions,
-            transaction_logs,
+            log_messages,
             _retryable_transactions,
             _transaction_count,
             _signature_count,
@@ -2127,7 +2197,7 @@ impl Bank {
         );
 
         let transaction_result = executed[0].0.clone().map(|_| ());
-        let log_messages = transaction_logs
+        let log_messages = log_messages
             .get(0)
             .map_or(vec![], |messages| messages.to_vec());
 
@@ -2167,6 +2237,7 @@ impl Bank {
             &self.feature_set,
         )
     }
+
     fn check_age(
         &self,
         txs: &[Transaction],
@@ -2185,7 +2256,7 @@ impl Bank {
                     if hash_age == Some(true) {
                         (Ok(()), Some(HashAgeKind::Extant))
                     } else if let Some((pubkey, acc)) = self.check_tx_durable_nonce(&tx) {
-                        (Ok(()), Some(HashAgeKind::DurableNonce(pubkey, acc)))
+                        (Ok(()), Some(HashAgeKind::DurableNoncePartial(pubkey, acc)))
                     } else if hash_age == Some(false) {
                         error_counters.blockhash_too_old += 1;
                         (Err(TransactionError::BlockhashNotFound), None)
@@ -2198,6 +2269,7 @@ impl Bank {
             })
             .collect()
     }
+
     fn check_signatures(
         &self,
         txs: &[Transaction],
@@ -2234,6 +2306,7 @@ impl Bank {
             })
             .collect()
     }
+
     fn filter_by_vote_transactions(
         &self,
         txs: &[Transaction],
@@ -2245,23 +2318,8 @@ impl Bank {
             .zip(lock_results.into_iter())
             .map(|((_, tx), lock_res)| {
                 if lock_res.0.is_ok() {
-                    if tx.message.instructions.len() == 1 {
-                        let instruction = &tx.message.instructions[0];
-                        let program_pubkey =
-                            tx.message.account_keys[instruction.program_id_index as usize];
-                        if program_pubkey == solana_vote_program::id() {
-                            if let Ok(vote_instruction) =
-                                limited_deserialize::<VoteInstruction>(&instruction.data)
-                            {
-                                match vote_instruction {
-                                    VoteInstruction::Vote(_)
-                                    | VoteInstruction::VoteSwitch(_, _) => {
-                                        return lock_res;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
+                    if is_simple_vote_transaction(tx) {
+                        return lock_res;
                     }
 
                     error_counters.not_allowed_during_cluster_maintenance += 1;
@@ -2583,7 +2641,7 @@ impl Bank {
         let mut signature_count: u64 = 0;
         let mut inner_instructions: Vec<Option<InnerInstructionsList>> =
             Vec::with_capacity(txs.len());
-        let mut transaction_logs: Vec<TransactionLogMessages> = Vec::with_capacity(txs.len());
+        let mut transaction_log_messages = Vec::with_capacity(txs.len());
         let bpf_compute_budget = self
             .bpf_compute_budget
             .unwrap_or_else(|| BpfComputeBudget::new(&self.feature_set));
@@ -2645,7 +2703,6 @@ impl Bank {
                             Rc::try_unwrap(log_collector.unwrap_or_default())
                                 .unwrap_or_default()
                                 .into();
-
                         //****************************************************************
                         // DMLOG
                         //****************************************************************
@@ -2653,7 +2710,7 @@ impl Bank {
                             println!("DMLOG TRX_LOG {} {}", tx.signatures[0], hex::encode(log));
                         }
                         //****************************************************************
-                        transaction_logs.push(log_messages);
+                        transaction_log_messages.push(log_messages);
                     }
 
                     Self::compile_recorded_instructions(
@@ -2691,7 +2748,10 @@ impl Bank {
 
         let mut tx_count: u64 = 0;
         let err_count = &mut error_counters.total;
-        for ((r, _hash_age_kind), tx) in executed.iter().zip(txs.iter()) {
+        let transaction_log_collector_config =
+            self.transaction_log_collector_config.read().unwrap();
+
+        for (i, ((r, _hash_age_kind), tx)) in executed.iter().zip(txs.iter()).enumerate() {
             if let Some(debug_keys) = &self.transaction_debug_keys {
                 for key in &tx.message.account_keys {
                     if debug_keys.contains(key) {
@@ -2700,6 +2760,50 @@ impl Bank {
                     }
                 }
             }
+
+            if transaction_log_collector_config.filter != TransactionLogCollectorFilter::None {
+                let mut transaction_log_collector = self.transaction_log_collector.write().unwrap();
+                let transaction_log_index = transaction_log_collector.logs.len();
+
+                let mut mentioned_address = false;
+                if !transaction_log_collector_config
+                    .mentioned_addresses
+                    .is_empty()
+                {
+                    for key in &tx.message.account_keys {
+                        if transaction_log_collector_config
+                            .mentioned_addresses
+                            .contains(key)
+                        {
+                            transaction_log_collector
+                                .mentioned_address_map
+                                .entry(*key)
+                                .or_default()
+                                .push(transaction_log_index);
+                            mentioned_address = true;
+                        }
+                    }
+                }
+
+                let is_vote = is_simple_vote_transaction(tx);
+
+                let store = match transaction_log_collector_config.filter {
+                    TransactionLogCollectorFilter::All => !is_vote || mentioned_address,
+                    TransactionLogCollectorFilter::AllWithVotes => true,
+                    TransactionLogCollectorFilter::None => false,
+                    TransactionLogCollectorFilter::OnlyMentionedAddresses => mentioned_address,
+                };
+
+                if store {
+                    transaction_log_collector.logs.push(TransactionLogInfo {
+                        signature: tx.signatures[0],
+                        result: r.clone(),
+                        is_vote,
+                        log_messages: transaction_log_messages.get(i).cloned().unwrap_or_default(),
+                    });
+                }
+            }
+
             if r.is_ok() {
                 tx_count += 1;
             } else {
@@ -2721,7 +2825,7 @@ impl Bank {
             loaded_accounts,
             executed,
             inner_instructions,
-            transaction_logs,
+            transaction_log_messages,
             retryable_txs,
             tx_count,
             signature_count,
@@ -2744,17 +2848,18 @@ impl Bank {
         let results = OrderedIterator::new(txs, iteration_order)
             .zip(executed.iter())
             .map(|((_, tx), (res, hash_age_kind))| {
-                let (fee_calculator, is_durable_nonce) = match hash_age_kind {
-                    Some(HashAgeKind::DurableNonce(_, account)) => {
-                        (nonce_account::fee_calculator_of(account), true)
-                    }
-                    _ => (
-                        hash_queue
-                            .get_fee_calculator(&tx.message().recent_blockhash)
-                            .cloned(),
-                        false,
-                    ),
-                };
+                let (fee_calculator, is_durable_nonce) = hash_age_kind
+                    .as_ref()
+                    .and_then(|hash_age_kind| hash_age_kind.fee_calculator())
+                    .map(|maybe_fee_calculator| (maybe_fee_calculator, true))
+                    .unwrap_or_else(|| {
+                        (
+                            hash_queue
+                                .get_fee_calculator(&tx.message().recent_blockhash)
+                                .cloned(),
+                            false,
+                        )
+                    });
                 let fee_calculator = fee_calculator.ok_or(TransactionError::BlockhashNotFound)?;
 
                 let fee = fee_calculator.calculate_fee_with_config(tx.message(), &fee_config);
@@ -3677,6 +3782,26 @@ impl Bank {
             .load_by_program_slot(self.slot(), Some(program_id))
     }
 
+    pub fn get_transaction_logs(
+        &self,
+        address: Option<&Pubkey>,
+    ) -> Option<Vec<TransactionLogInfo>> {
+        let transaction_log_collector = self.transaction_log_collector.read().unwrap();
+
+        match address {
+            None => Some(transaction_log_collector.logs.clone()),
+            Some(address) => transaction_log_collector
+                .mentioned_address_map
+                .get(address)
+                .map(|log_indices| {
+                    log_indices
+                        .iter()
+                        .map(|i| transaction_log_collector.logs[*i].clone())
+                        .collect()
+                }),
+        }
+    }
+
     pub fn get_all_accounts_modified_since_parent(&self) -> Vec<(Pubkey, Account)> {
         self.rc.accounts.load_by_program_slot(self.slot(), None)
     }
@@ -4381,6 +4506,21 @@ pub fn goto_end_of_slot(bank: &mut Bank) {
     }
 }
 
+fn is_simple_vote_transaction(transaction: &Transaction) -> bool {
+    if transaction.message.instructions.len() == 1 {
+        let instruction = &transaction.message.instructions[0];
+        let program_pubkey =
+            transaction.message.account_keys[instruction.program_id_index as usize];
+        if program_pubkey == solana_vote_program::id() {
+            if let Ok(vote_instruction) = limited_deserialize::<VoteInstruction>(&instruction.data)
+            {
+                return matches!(vote_instruction, VoteInstruction::Vote(_) | VoteInstruction::VoteSwitch(_, _));
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -4428,9 +4568,56 @@ pub(crate) mod tests {
     #[test]
     fn test_hash_age_kind_is_durable_nonce() {
         assert!(
-            HashAgeKind::DurableNonce(Pubkey::default(), Account::default()).is_durable_nonce()
+            HashAgeKind::DurableNoncePartial(Pubkey::default(), Account::default())
+                .is_durable_nonce()
         );
+        assert!(
+            HashAgeKind::DurableNonceFull(Pubkey::default(), Account::default(), None)
+                .is_durable_nonce()
+        );
+        assert!(HashAgeKind::DurableNonceFull(
+            Pubkey::default(),
+            Account::default(),
+            Some(Account::default())
+        )
+        .is_durable_nonce());
         assert!(!HashAgeKind::Extant.is_durable_nonce());
+    }
+
+    #[test]
+    fn test_hash_age_kind_fee_calculator() {
+        let state =
+            nonce::state::Versions::new_current(nonce::State::Initialized(nonce::state::Data {
+                authority: Pubkey::default(),
+                blockhash: Hash::new_unique(),
+                fee_calculator: FeeCalculator::default(),
+            }));
+        let account = Account::new_data(42, &state, &system_program::id()).unwrap();
+
+        assert_eq!(HashAgeKind::Extant.fee_calculator(), None);
+        assert_eq!(
+            HashAgeKind::DurableNoncePartial(Pubkey::default(), account.clone()).fee_calculator(),
+            Some(Some(FeeCalculator::default()))
+        );
+        assert_eq!(
+            HashAgeKind::DurableNoncePartial(Pubkey::default(), Account::default())
+                .fee_calculator(),
+            Some(None)
+        );
+        assert_eq!(
+            HashAgeKind::DurableNonceFull(Pubkey::default(), account, Some(Account::default()))
+                .fee_calculator(),
+            Some(Some(FeeCalculator::default()))
+        );
+        assert_eq!(
+            HashAgeKind::DurableNonceFull(
+                Pubkey::default(),
+                Account::default(),
+                Some(Account::default())
+            )
+            .fee_calculator(),
+            Some(None)
+        );
     }
 
     #[test]
@@ -8617,6 +8804,50 @@ pub(crate) mod tests {
             bank.process_transaction(&durable_tx),
             Err(TransactionError::BlockhashNotFound),
         );
+    }
+
+    #[test]
+    fn test_nonce_payer() {
+        solana_logger::setup();
+        let (mut bank, _mint_keypair, custodian_keypair, nonce_keypair) =
+            setup_nonce_with_bank(10_000_000, |_| {}, 5_000_000, 250_000, None).unwrap();
+        let alice_keypair = Keypair::new();
+        let alice_pubkey = alice_keypair.pubkey();
+        let custodian_pubkey = custodian_keypair.pubkey();
+        let nonce_pubkey = nonce_keypair.pubkey();
+
+        warn!("alice: {}", alice_pubkey);
+        warn!("custodian: {}", custodian_pubkey);
+        warn!("nonce: {}", nonce_pubkey);
+        warn!("nonce account: {:?}", bank.get_account(&nonce_pubkey));
+        warn!("cust: {:?}", bank.get_account(&custodian_pubkey));
+        let nonce_hash = get_nonce_account(&bank, &nonce_pubkey).unwrap();
+
+        for _ in 0..MAX_RECENT_BLOCKHASHES + 1 {
+            goto_end_of_slot(Arc::get_mut(&mut bank).unwrap());
+            bank = Arc::new(new_from_parent(&bank));
+        }
+
+        let durable_tx = Transaction::new_signed_with_payer(
+            &[
+                system_instruction::advance_nonce_account(&nonce_pubkey, &nonce_pubkey),
+                system_instruction::transfer(&custodian_pubkey, &alice_pubkey, 100_000_000),
+            ],
+            Some(&nonce_pubkey),
+            &[&custodian_keypair, &nonce_keypair],
+            nonce_hash,
+        );
+        warn!("{:?}", durable_tx);
+        assert_eq!(
+            bank.process_transaction(&durable_tx),
+            Err(TransactionError::InstructionError(
+                1,
+                system_instruction::SystemError::ResultWithNegativeLamports.into(),
+            ))
+        );
+        /* Check fee charged and nonce has advanced */
+        assert_eq!(bank.get_balance(&nonce_pubkey), 240_000);
+        assert_ne!(nonce_hash, get_nonce_account(&bank, &nonce_pubkey).unwrap());
     }
 
     #[test]
