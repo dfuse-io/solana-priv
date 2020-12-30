@@ -2348,6 +2348,7 @@ impl Bank {
             MAX_PROCESSING_AGE - MAX_TRANSACTION_FORWARDING_DELAY,
             false,
             true,
+            None,
         );
 
         let transaction_result = executed[0].0.clone().map(|_| ());
@@ -2749,6 +2750,7 @@ impl Bank {
         max_age: usize,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
+        dmslot_number: Option<u64>
     ) -> (
         Vec<TransactionLoadResult>,
         Vec<TransactionExecutionResult>,
@@ -2829,10 +2831,14 @@ impl Bank {
                         None
                     };
 
+
+                    let slot_num = dmslot_number.unwrap_or(0);
+
                     let msg = tx.message();
                     let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
                     let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
-                    println!("DMLOG TRX_START {} {} {} {} {} {}",
+                    println!("DMLOG TRX_START {} {} {} {} {} {} {}",
+                             slot_num,
                              sigs,
                              msg.header.num_required_signatures,
                              msg.header.num_readonly_signed_accounts,
@@ -2842,7 +2848,6 @@ impl Bank {
                     );
                     let process_result = self.message_processor.process_message(
                         tx.message(),
-                        tx.signatures[0],
                         &loader_refcells,
                         &account_refcells,
                         &self.rent_collector,
@@ -2851,6 +2856,8 @@ impl Bank {
                         instruction_recorders.as_deref(),
                         self.feature_set.clone(),
                         bpf_compute_budget,
+                        tx.signatures[0],
+                        slot_num
                     );
 
                     if enable_log_recording {
@@ -2862,7 +2869,7 @@ impl Bank {
                         // DMLOG
                         //****************************************************************
                         for log in log_messages.clone() {
-                            println!("DMLOG TRX_LOG {} {}", tx.signatures[0], hex::encode(log));
+                            println!("DMLOG TRX_LOG {} {} {}", slot_num, tx.signatures[0], hex::encode(log));
                         }
                         //****************************************************************
                         transaction_log_messages.push(log_messages);
@@ -2894,7 +2901,7 @@ impl Bank {
                         } else {
                             nonce_rollback.clone()
                         };
-                    println!("DMLOG TRX_END {}", tx.signatures[0]);
+                    println!("DMLOG TRX_END {} {}", slot_num, tx.signatures[0]);
                     (process_result, nonce_rollback)
                 }
             })
@@ -3685,6 +3692,7 @@ impl Bank {
         collect_balances: bool,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
+        dmslot_number: Option<u64>
     ) -> (
         TransactionResults,
         TransactionBalancesSet,
@@ -3710,6 +3718,7 @@ impl Bank {
             max_age,
             enable_cpi_recording,
             enable_log_recording,
+            dmslot_number,
         );
 
         let results = self.commit_transactions(
@@ -3736,7 +3745,7 @@ impl Bank {
     #[must_use]
     pub fn process_transactions(&self, txs: &[Transaction]) -> Vec<Result<()>> {
         let batch = self.prepare_batch(txs, None);
-        self.load_execute_and_commit_transactions(&batch, MAX_PROCESSING_AGE, false, false, false)
+        self.load_execute_and_commit_transactions(&batch, MAX_PROCESSING_AGE, false, false, false, None)
             .0
             .fee_collection_results
     }
@@ -7517,6 +7526,7 @@ pub(crate) mod tests {
                 false,
                 false,
                 false,
+                None,
             )
             .0
             .fee_collection_results;
@@ -9445,6 +9455,7 @@ pub(crate) mod tests {
                 true,
                 false,
                 false,
+                None,
             );
 
         assert!(inner_instructions[0].iter().all(|ix| ix.is_empty()));

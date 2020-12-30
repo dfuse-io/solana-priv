@@ -32,6 +32,7 @@ pub type ProcessInstructionWithContext =
 
 #[derive(Default,Copy,Clone)]
 pub struct DMLogContext {
+    pub slot_number: u64,
     pub ordinal_number: u32,
     pub parent_ordinal_number: u32,
     pub trx_id: Signature,
@@ -59,7 +60,8 @@ impl DMLogContext {
     pub fn print_instruction_start(&self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
         let accounts: Vec<String> = keyed_accounts.into_iter().map(|i| format!("{}:{}{}", i.unsigned_key(), if i.is_signer() { 1 }  else { 0 }, if i.is_writable() { 1 }  else { 0 })).collect();
         println!(
-            "DMLOG INST_S {} {} {} {} {} {}",
+            "DMLOG INST_S {} {} {} {} {} {} {}",
+            self.slot_number,
             self.trx_id,
             self.ordinal_number,
             self.parent_ordinal_number,
@@ -71,7 +73,8 @@ impl DMLogContext {
 
     pub fn print_lamport_change(&self, pubkey: Pubkey, pre: u64, post: u64) {
         println!(
-            "DMLOG LAMP_CH {} {} {} {} {}",
+            "DMLOG LAMP_CH {} {} {} {} {} {}",
+            self.slot_number,
             self.trx_id,
             self.ordinal_number,
             pubkey,
@@ -82,7 +85,8 @@ impl DMLogContext {
 
     pub fn print_account_change(&self, pubkey: Pubkey, pre: &[u8], post: &[u8]) {
         println!(
-            "DMLOG ACCT_CH {} {} {} {} {}",
+            "DMLOG ACCT_CH {} {} {} {} {} {}",
+            self.slot_number,
             self.trx_id,
             self.ordinal_number,
             pubkey,

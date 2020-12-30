@@ -234,6 +234,7 @@ impl<'a> ThisInvokeContext<'a> {
         executors: Rc<RefCell<Executors>>,
         instruction_recorder: Option<InstructionRecorder>,
         feature_set: Arc<FeatureSet>,
+        dmlog_slot_number: u64,
         dmlog_trx_id: Signature,
         dmlog_last_ordinal_number: u32,
     ) -> Self {
@@ -253,6 +254,7 @@ impl<'a> ThisInvokeContext<'a> {
             instruction_recorder,
             feature_set,
             dmlog_context: DMLogContext{
+                slot_number: dmlog_slot_number,
                 ordinal_number: dmlog_last_ordinal_number,
                 parent_ordinal_number: 0,
                 trx_id: dmlog_trx_id,
@@ -824,7 +826,6 @@ impl MessageProcessor {
     fn execute_instruction(
         &self,
         message: &Message,
-        dmlog_trx_id: Signature,
         instruction: &CompiledInstruction,
         executable_accounts: &[(Pubkey, RefCell<Account>)],
         accounts: &[Rc<RefCell<Account>>],
@@ -835,7 +836,9 @@ impl MessageProcessor {
         instruction_index: usize,
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
+        dmlog_trx_id: Signature,
         dmlog_last_ordinal_number: u32,
+        dmlog_slot_num: u64,
     ) -> Result<u32, InstructionError> {
         // Fixup the special instructions key if present
         // before the account pre-values are taken care of
@@ -863,6 +866,7 @@ impl MessageProcessor {
             executors,
             instruction_recorder,
             feature_set,
+            dmlog_slot_num,
             dmlog_trx_id,
             dmlog_last_ordinal_number,
         );
@@ -898,7 +902,6 @@ impl MessageProcessor {
     pub fn process_message(
         &self,
         message: &Message,
-        dmlog_trx_id: Signature,
         loaders: &[Vec<(Pubkey, RefCell<Account>)>],
         accounts: &[Rc<RefCell<Account>>],
         rent_collector: &RentCollector,
@@ -907,6 +910,8 @@ impl MessageProcessor {
         instruction_recorders: Option<&[InstructionRecorder]>,
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
+        dmlog_trx_id: Signature,
+        dmlog_slot_num: u64,
     ) -> Result<(), TransactionError> {
         let mut dmlog_last_ordinal_number = 0;
         for (instruction_index, instruction) in message.instructions.iter().enumerate() {
@@ -916,7 +921,6 @@ impl MessageProcessor {
             dmlog_last_ordinal_number = self
                 .execute_instruction(
                     message,
-                    dmlog_trx_id,
                     instruction,
                     &loaders[instruction_index],
                     accounts,
@@ -927,7 +931,9 @@ impl MessageProcessor {
                     instruction_index,
                     feature_set.clone(),
                     bpf_compute_budget,
+                    dmlog_trx_id,
                     dmlog_last_ordinal_number,
+                    dmlog_slot_num,
                 )
                 .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
         }
@@ -1536,6 +1542,8 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
+            Signature::default(),
+            0
         );
         assert_eq!(result, Ok(()));
         assert_eq!(accounts[0].borrow().lamports, 100);
@@ -1560,6 +1568,8 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
+            Signature::default(),
+            0
         );
         assert_eq!(
             result,
@@ -1588,6 +1598,8 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
+            Signature::default(),
+            0
         );
         assert_eq!(
             result,
@@ -1700,6 +1712,8 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
+            Signature::default(),
+            0
         );
         assert_eq!(
             result,
@@ -1728,6 +1742,8 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
+            Signature::default(),
+            0
         );
         assert_eq!(result, Ok(()));
 
@@ -1753,6 +1769,9 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
+            Signature::default(),
+            0
+
         );
         assert_eq!(result, Ok(()));
         assert_eq!(accounts[0].borrow().lamports, 80);

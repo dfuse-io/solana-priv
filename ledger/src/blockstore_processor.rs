@@ -101,6 +101,7 @@ fn execute_batch(
     bank: &Arc<Bank>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
+    dmslot_number: Option<u64>
 ) -> Result<()> {
     let (tx_results, balances, inner_instructions, transaction_logs) =
         batch.bank().load_execute_and_commit_transactions(
@@ -109,6 +110,7 @@ fn execute_batch(
             transaction_status_sender.is_some(),
             transaction_status_sender.is_some(),
             transaction_status_sender.is_some(),
+            dmslot_number,
         );
 
     bank_utils::find_and_send_votes(batch.transactions(), &tx_results, replay_vote_sender);
@@ -142,6 +144,7 @@ fn execute_batches(
     entry_callback: Option<&ProcessCallback>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
+    dmslot_number: Option<u64>,
 ) -> Result<()> {
     inc_new_counter_debug!("bank-par_execute_entries-count", batches.len());
     let results: Vec<Result<()>> = PAR_THREAD_POOL.with(|thread_pool| {
@@ -149,7 +152,7 @@ fn execute_batches(
             batches
                 .into_par_iter()
                 .map_with(transaction_status_sender, |sender, batch| {
-                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender);
+                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, dmslot_number);
                     if let Some(entry_callback) = entry_callback {
                         entry_callback(bank);
                     }
@@ -181,6 +184,7 @@ pub fn process_entries(
         None,
         transaction_status_sender,
         replay_vote_sender,
+        None
     )
 }
 
@@ -191,6 +195,7 @@ fn process_entries_with_callback(
     entry_callback: Option<&ProcessCallback>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
+    dmslot_number: Option<u64>,
 ) -> Result<()> {
     // accumulator for entries that can be processed in parallel
     let mut batches = vec![];
@@ -210,6 +215,7 @@ fn process_entries_with_callback(
                     entry_callback,
                     transaction_status_sender.clone(),
                     replay_vote_sender,
+                    dmslot_number,
                 )?;
                 batches.clear();
                 for hash in &tick_hashes {
@@ -266,6 +272,7 @@ fn process_entries_with_callback(
                     entry_callback,
                     transaction_status_sender.clone(),
                     replay_vote_sender,
+                    dmslot_number,
                 )?;
                 batches.clear();
             }
@@ -277,6 +284,7 @@ fn process_entries_with_callback(
         entry_callback,
         transaction_status_sender,
         replay_vote_sender,
+        dmslot_number,
     )?;
     for hash in tick_hashes {
         bank.register_tick(&hash);
@@ -721,6 +729,7 @@ pub fn confirm_slot(
         entry_callback,
         transaction_status_sender,
         replay_vote_sender,
+        Some(slot),
     )
     .map_err(BlockstoreProcessorError::from);
     replay_elapsed.stop();
@@ -2880,7 +2889,7 @@ pub mod tests {
         let entry = next_entry(&new_blockhash, 1, vec![tx]);
         entries.push(entry);
 
-        process_entries_with_callback(&bank0, &entries, true, None, None, None).unwrap();
+        process_entries_with_callback(&bank0, &entries, true, None, None, None, None).unwrap();
         assert_eq!(bank0.get_balance(&keypair.pubkey()), 1)
     }
 
@@ -2965,6 +2974,7 @@ pub mod tests {
             false,
             false,
             false,
+            None
         );
         let (err, signature) = get_first_error(&batch, fee_collection_results).unwrap();
         // First error found should be for the 2nd transaction, due to iteration_order
