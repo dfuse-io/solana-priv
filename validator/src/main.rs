@@ -37,6 +37,7 @@ use solana_sdk::{
     genesis_config::GenesisConfig,
     hash::Hash,
     pubkey::Pubkey,
+    deepmind::{enable_deepmind, deepmind_enabled},
     signature::{Keypair, Signer},
 };
 use std::{
@@ -1442,6 +1443,12 @@ pub fn main() {
                 .takes_value(false)
                 .hidden(true) // Don't document this argument. It's a stub for v1.5 forward compatibility
         )
+        .arg(
+            Arg::with_name("deepmind")
+                .long("--deepmind")
+                .takes_value(false)
+                .help("Activate/deactivate deep-mind instrumentation, disabled by default"),
+        )
         .get_matches();
 
     let identity_keypair = Arc::new(keypair_of(&matches, "identity").unwrap_or_else(Keypair::new));
@@ -1465,7 +1472,13 @@ pub fn main() {
         ),
     };
 
-    println!("DMLOG INIT VERSION 1");
+    if matches.is_present("deepmind") {
+        enable_deepmind();
+    }
+
+    if deepmind_enabled() {
+        println!("DMLOG INIT VERSION 1");
+    }
 
     let private_rpc = matches.is_present("private_rpc");
     let no_port_check = matches.is_present("no_port_check");

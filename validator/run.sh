@@ -1,6 +1,7 @@
 #!/bin/bash
 
 export RUST_LOG=solana=info,solana_metrics=error
+export RUST_BACKTRACE=full
 
 ../target/debug/solana-validator \
     --log - \
@@ -25,8 +26,9 @@ export RUST_LOG=solana=info,solana_metrics=error
     --expected-genesis-hash 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d \
     --wal-recovery-mode skip_any_corrupted_record \
     --limit-ledger-size \
-    --no-snapshot-fetch \
     --gossip-host "$GOSSIP_HOST" \
+    --deepmind \
+#    --no-snapshot-fetch \
 #    --no-port-check \
 #    --expected-shred-version 13490 \
 #    --no-untrusted-rpc \

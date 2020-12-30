@@ -15,8 +15,9 @@ use solana_sdk::{
     native_loader,
     process_instruction::{
         BpfComputeBudget, ComputeMeter, Executor, InvokeContext, Logger,
-        ProcessInstructionWithContext, DMLogContext,
+        ProcessInstructionWithContext,
     },
+    deepmind::{DMLogContext},
     pubkey::Pubkey,
     rent::Rent,
     system_program,

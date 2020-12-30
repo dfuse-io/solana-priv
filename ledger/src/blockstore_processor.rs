@@ -35,6 +35,7 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     timing::duration_as_ms,
     transaction::{Result, Transaction, TransactionError},
+    deepmind::deepmind_enabled,
 };
 use std::{
     cell::RefCell,
@@ -206,7 +207,9 @@ fn process_entries_with_callback(
             tick_hashes.push(entry.hash);
             let upper_tick_height = bank.tick_height() + tick_hashes.len() as u64;
             if bank.is_block_boundary(upper_tick_height) {
-                println!("DMLOG SLOT_BOUND {} {} {}", upper_tick_height, bank.ticks_per_slot(), entry.hash);
+                if deepmind_enabled() {
+                    println!("DMLOG SLOT_BOUND {} {} {}", upper_tick_height, bank.ticks_per_slot(), entry.hash);
+                }
                 // If it's a tick that will cause a new blockhash to be created,
                 // execute the group and register the tick
                 execute_batches(
@@ -701,24 +704,26 @@ pub fn confirm_slot(
         })
         .unwrap_or((0, 0));
 
-    println!(
-        "DMLOG SLOT_PROCESS {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
-        if slot_full { "full" } else { "partial" },
-        slot,
-        dmlog_last_hash,       // current SLOT hash
-        progress.last_entry,   // previous SLOT hash, not blockhash
-        bank.last_blockhash(), // previous BLOCK hash, not slot hash (in case we skipped one)
-        bank.tick_height(),
-        bank.block_height(), // total blocks created until this point (OFF BY ONE CHECK HERE)
-        roots[0],
-        roots[roots.len() - 1],
-        roots.len(),
-        min_max.0,
-        min_max.1,
-        num_entries,
-        num_txs,
-        num_shreds,
-    );
+    if deepmind_enabled() {
+        println!(
+            "DMLOG SLOT_PROCESS {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
+            if slot_full { "full" } else { "partial" },
+            slot,
+            dmlog_last_hash,       // current SLOT hash
+            progress.last_entry,   // previous SLOT hash, not blockhash
+            bank.last_blockhash(), // previous BLOCK hash, not slot hash (in case we skipped one)
+            bank.tick_height(),
+            bank.block_height(), // total blocks created until this point (OFF BY ONE CHECK HERE)
+            roots[0],
+            roots[roots.len() - 1],
+            roots.len(),
+            min_max.0,
+            min_max.1,
+            num_entries,
+            num_txs,
+            num_shreds,
+        );
+    }
     //****************************************************************
 
     let mut replay_elapsed = Measure::start("replay_elapsed");
@@ -748,11 +753,13 @@ pub fn confirm_slot(
     //****************************************************************
     // DMLOG
     //****************************************************************
-    if process_result.is_err() {
-        println!("DMLOG SLOT_FAILED {} {:#?}", slot, process_result);
-    } else {
-        if slot_full {
-            println!("DMLOG SLOT_END {} {} {}", slot, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
+    if deepmind_enabled() {
+        if process_result.is_err() {
+            println!("DMLOG SLOT_FAILED {} {:#?}", slot, process_result);
+        } else {
+            if slot_full {
+                println!("DMLOG SLOT_END {} {} {}", slot, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
+            }
         }
     }
     //****************************************************************
@@ -1087,7 +1094,9 @@ fn process_single_slot(
 
     bank.freeze(); // all banks handled by this routine are created from complete slots
 
-    println!("DMLOG BLOCK_FREEZE {} {}", bank.slot(), bank.hash());
+    if deepmind_enabled() {
+        println!("DMLOG BLOCK_FREEZE {} {}", bank.slot(), bank.hash());
+    }
 
     Ok(())
 }

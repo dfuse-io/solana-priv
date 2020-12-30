@@ -37,6 +37,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     timing::{duration_as_ms, timestamp},
     transaction::{self, Transaction, TransactionError},
+    deepmind::deepmind_enabled,
 };
 use std::{
     cmp, env,
@@ -530,7 +531,9 @@ impl BankingStage {
         } else {
             vec![]
         };
-        println!("DMLOG HALT tpu code path. only consider tvu codepath");
+        if deepmind_enabled() {
+            println!("DMLOG HALT tpu code path. only consider tvu codepath");
+        }
         let (
             mut loaded_accounts,
             results,

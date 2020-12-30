@@ -43,6 +43,7 @@ pub mod system_transaction;
 pub mod timing;
 pub mod transaction;
 pub mod transport;
+pub mod deepmind;
 
 /// Convenience macro to declare a static public key and functions to interact with it
 ///

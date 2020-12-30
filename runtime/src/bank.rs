@@ -65,6 +65,7 @@ use solana_sdk::{
     sysvar::{self},
     timing::years_as_slots,
     transaction::{self, Result, Transaction, TransactionError},
+    deepmind::deepmind_enabled,
 };
 use solana_stake_program::stake_state::{
     self, Delegation, InflationPointCalculationEvent, PointValue,
@@ -310,6 +311,7 @@ pub struct BankRc {
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
 use solana_frozen_abi::abi_example::AbiExample;
+
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
 impl AbiExample for BankRc {
     fn example() -> Self {
@@ -2837,15 +2839,17 @@ impl Bank {
                     let msg = tx.message();
                     let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
                     let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
-                    println!("DMLOG TRX_START {} {} {} {} {} {} {}",
-                             slot_num,
-                             sigs,
-                             msg.header.num_required_signatures,
-                             msg.header.num_readonly_signed_accounts,
-                             msg.header.num_readonly_unsigned_accounts,
-                             account_keys,
-                             msg.recent_blockhash,
-                    );
+                    if deepmind_enabled() {
+                        println!("DMLOG TRX_START {} {} {} {} {} {} {}",
+                                 slot_num,
+                                 sigs,
+                                 msg.header.num_required_signatures,
+                                 msg.header.num_readonly_signed_accounts,
+                                 msg.header.num_readonly_unsigned_accounts,
+                                 account_keys,
+                                 msg.recent_blockhash,
+                        );
+                    }
                     let process_result = self.message_processor.process_message(
                         tx.message(),
                         &loader_refcells,
@@ -2868,8 +2872,10 @@ impl Bank {
                         //****************************************************************
                         // DMLOG
                         //****************************************************************
-                        for log in log_messages.clone() {
-                            println!("DMLOG TRX_LOG {} {} {}", slot_num, tx.signatures[0], hex::encode(log));
+                        if deepmind_enabled() {
+                            for log in log_messages.clone() {
+                                println!("DMLOG TRX_LOG {} {} {}", slot_num, tx.signatures[0], hex::encode(log));
+                            }
                         }
                         //****************************************************************
                         transaction_log_messages.push(log_messages);
@@ -2901,7 +2907,9 @@ impl Bank {
                         } else {
                             nonce_rollback.clone()
                         };
-                    println!("DMLOG TRX_END {} {}", slot_num, tx.signatures[0]);
+                    if deepmind_enabled() {
+                        println!("DMLOG TRX_END {} {}", slot_num, tx.signatures[0]);
+                    }
                     (process_result, nonce_rollback)
                 }
             })
