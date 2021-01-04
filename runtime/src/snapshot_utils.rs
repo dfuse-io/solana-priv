@@ -1,4 +1,5 @@
 use crate::{
+    accounts_index::AccountIndex,
     bank::{Bank, BankSlotDelta, Builtins},
     bank_forks::CompressionType,
     hardened_unpack::{unpack_snapshot, UnpackError},
@@ -14,12 +15,7 @@ use fs_extra::dir::CopyOptions;
 use log::*;
 use regex::Regex;
 use solana_measure::measure::Measure;
-use solana_sdk::{
-    clock::Slot,
-    genesis_config::{ClusterType, GenesisConfig},
-    hash::Hash,
-    pubkey::Pubkey,
-};
+use solana_sdk::{clock::Slot, genesis_config::GenesisConfig, hash::Hash, pubkey::Pubkey};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::{
@@ -597,6 +593,7 @@ pub fn bank_from_archive<P: AsRef<Path>>(
     genesis_config: &GenesisConfig,
     debug_keys: Option<Arc<HashSet<Pubkey>>>,
     additional_builtins: Option<&Builtins>,
+    account_indexes: HashSet<AccountIndex>,
 ) -> Result<Bank> {
     // Untar the snapshot into a temporary directory
     let unpack_dir = tempfile::Builder::new()
@@ -621,23 +618,12 @@ pub fn bank_from_archive<P: AsRef<Path>>(
         genesis_config,
         debug_keys,
         additional_builtins,
+        account_indexes,
     )?;
 
     if !bank.verify_snapshot_bank() {
         panic!("Snapshot bank for slot {} failed to verify", bank.slot());
     }
-    if genesis_config.cluster_type == ClusterType::Testnet {
-        // remove me after we transitions to the fixed rent distribution with no overflow
-        let old = bank.set_capitalization();
-        if old != bank.capitalization() {
-            warn!(
-                "Capitalization was recalculated: {} => {}",
-                old,
-                bank.capitalization()
-            )
-        }
-    }
-
     measure.stop();
     info!("{}", measure);
 
@@ -792,6 +778,7 @@ fn rebuild_bank_from_snapshots<P>(
     genesis_config: &GenesisConfig,
     debug_keys: Option<Arc<HashSet<Pubkey>>>,
     additional_builtins: Option<&Builtins>,
+    account_indexes: HashSet<AccountIndex>,
 ) -> Result<Bank>
 where
     P: AsRef<Path>,
@@ -825,6 +812,7 @@ where
                 frozen_account_pubkeys,
                 debug_keys,
                 additional_builtins,
+                account_indexes,
             ),
         }?)
     })?;

@@ -11,16 +11,19 @@ use solana_runtime::message_processor::MessageProcessor;
 use solana_sdk::{
     account::Account,
     account_info::AccountInfo,
-    bpf_loader_deprecated,
+    account_utils::StateMut,
+    bpf_loader, bpf_loader_deprecated,
+    bpf_loader_upgradeable::{self, UpgradeableLoaderState},
     entrypoint::{MAX_PERMITTED_DATA_INCREASE, SUCCESS},
     feature_set::{
-        pubkey_log_syscall_enabled, ristretto_mul_syscall_enabled, sha256_syscall_enabled,
-        sol_log_compute_units_syscall,
+        limit_cpi_loader_invoke, pubkey_log_syscall_enabled, ristretto_mul_syscall_enabled,
+        sha256_syscall_enabled, sol_log_compute_units_syscall,
     },
     hash::{Hasher, HASH_BYTES},
     instruction::{AccountMeta, Instruction, InstructionError},
     keyed_account::KeyedAccount,
     message::Message,
+    native_loader,
     process_instruction::{stable_log, ComputeMeter, InvokeContext, Logger},
     program_error::ProgramError,
     pubkey::{Pubkey, PubkeyError, MAX_SEEDS},
@@ -649,6 +652,7 @@ trait SyscallInvokeSigned<'a> {
     fn translate_instruction(
         &self,
         addr: u64,
+        max_size: usize,
         ro_regions: &[MemoryRegion],
     ) -> Result<Instruction, EbpfError<BPFError>>;
     fn translate_accounts(
@@ -686,9 +690,12 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedRust<'a> {
     fn translate_instruction(
         &self,
         addr: u64,
+        max_size: usize,
         ro_regions: &[MemoryRegion],
     ) -> Result<Instruction, EbpfError<BPFError>> {
         let ix = translate_type!(Instruction, addr, ro_regions, self.loader_id)?;
+        check_instruction_size(ix.accounts.len(), ix.data.len(), max_size)?;
+
         let accounts = translate_slice!(
             AccountMeta,
             ix.accounts.as_ptr(),
@@ -957,15 +964,19 @@ impl<'a> SyscallInvokeSigned<'a> for SyscallInvokeSignedC<'a> {
             .try_borrow_mut()
             .map_err(|_| SyscallError::InvokeContextBorrowFailed.into())
     }
+
     fn get_callers_keyed_accounts(&self) -> &'a [KeyedAccount<'a>] {
         self.callers_keyed_accounts
     }
+
     fn translate_instruction(
         &self,
         addr: u64,
+        max_size: usize,
         ro_regions: &[MemoryRegion],
     ) -> Result<Instruction, EbpfError<BPFError>> {
         let ix_c = translate_type!(SolInstruction, addr, ro_regions, self.loader_id)?;
+        check_instruction_size(ix_c.accounts_len, ix_c.data_len, max_size)?;
         let program_id = translate_type!(Pubkey, ix_c.program_id_addr, ro_regions, self.loader_id)?;
         let meta_cs = translate_slice!(
             SolAccountMeta,
@@ -1158,6 +1169,30 @@ impl<'a> SyscallObject<BPFError> for SyscallInvokeSignedC<'a> {
     }
 }
 
+fn check_instruction_size(
+    num_accounts: usize,
+    data_len: usize,
+    max_size: usize,
+) -> Result<(), EbpfError<BPFError>> {
+    if max_size < num_accounts * size_of::<AccountMeta>() + data_len {
+        return Err(
+            SyscallError::InstructionError(InstructionError::ComputationalBudgetExceeded).into(),
+        );
+    }
+    Ok(())
+}
+
+fn check_authorized_program(program_id: &Pubkey) -> Result<(), EbpfError<BPFError>> {
+    if native_loader::check_id(program_id)
+        || bpf_loader::check_id(program_id)
+        || bpf_loader_deprecated::check_id(program_id)
+        || bpf_loader_upgradeable::check_id(program_id)
+    {
+        return Err(SyscallError::InstructionError(InstructionError::UnsupportedProgramId).into());
+    }
+    Ok(())
+}
+
 /// Call process instruction, common to both Rust and C
 fn call<'a>(
     syscall: &mut dyn SyscallInvokeSigned<'a>,
@@ -1176,7 +1211,13 @@ fn call<'a>(
 
     // Translate and verify caller's data
 
-    let instruction = syscall.translate_instruction(instruction_addr, ro_regions)?;
+    let instruction = syscall.translate_instruction(
+        instruction_addr,
+        invoke_context
+            .get_bpf_compute_budget()
+            .max_cpi_instruction_size,
+        ro_regions,
+    )?;
     let caller_program_id = invoke_context
         .get_caller()
         .map_err(SyscallError::InstructionError)?;
@@ -1190,9 +1231,12 @@ fn call<'a>(
         .get_callers_keyed_accounts()
         .iter()
         .collect::<Vec<&KeyedAccount>>();
-    let (message, callee_program_id, callee_program_id_index) =
+    let (message, callee_program_id) =
         MessageProcessor::create_message(&instruction, &keyed_account_refs, &signers)
             .map_err(SyscallError::InstructionError)?;
+    if invoke_context.is_feature_active(&limit_cpi_loader_invoke::id()) {
+        check_authorized_program(&callee_program_id)?;
+    }
     let (accounts, account_refs) = syscall.translate_accounts(
         &message,
         account_infos_addr,
@@ -1204,17 +1248,41 @@ fn call<'a>(
     // Process instruction
 
     invoke_context.record_instruction(&instruction);
+
     let program_account =
-        (**accounts
-            .get(callee_program_id_index)
+        invoke_context
+            .get_account(&callee_program_id)
             .ok_or(SyscallError::InstructionError(
                 InstructionError::MissingAccount,
-            ))?)
-        .clone();
+            ))?;
     if !program_account.borrow().executable {
         return Err(SyscallError::InstructionError(InstructionError::AccountNotExecutable).into());
     }
-    let executable_accounts = vec![(callee_program_id, program_account)];
+    let programdata_executable = if program_account.borrow().owner == bpf_loader_upgradeable::id() {
+        if let UpgradeableLoaderState::Program {
+            programdata_address,
+        } = program_account
+            .borrow()
+            .state()
+            .map_err(SyscallError::InstructionError)?
+        {
+            if let Some(account) = invoke_context.get_account(&programdata_address) {
+                Some((programdata_address, account))
+            } else {
+                return Err(
+                    SyscallError::InstructionError(InstructionError::MissingAccount).into(),
+                );
+            }
+        } else {
+            return Err(SyscallError::InstructionError(InstructionError::MissingAccount).into());
+        }
+    } else {
+        None
+    };
+    let mut executable_accounts = vec![(callee_program_id, program_account)];
+    if let Some(programdata) = programdata_executable {
+        executable_accounts.push(programdata);
+    }
 
     #[allow(clippy::deref_addrof)]
     match MessageProcessor::process_cross_program_instruction(

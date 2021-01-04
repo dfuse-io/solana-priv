@@ -4,7 +4,7 @@
 use crate::{
     cluster_info::ClusterInfo,
     poh_recorder::{PohRecorder, PohRecorderError, WorkingBankEntry},
-    poh_service::PohService,
+    poh_service::{self, PohService},
 };
 use crossbeam_channel::{Receiver as CrossbeamReceiver, RecvTimeoutError};
 use itertools::Itertools;
@@ -1077,7 +1077,13 @@ pub fn create_test_recorder(
     poh_recorder.set_bank(&bank);
 
     let poh_recorder = Arc::new(Mutex::new(poh_recorder));
-    let poh_service = PohService::new(poh_recorder.clone(), &poh_config, &exit);
+    let poh_service = PohService::new(
+        poh_recorder.clone(),
+        &poh_config,
+        &exit,
+        bank.ticks_per_slot(),
+        poh_service::DEFAULT_PINNED_CPU_CORE,
+    );
 
     (exit, poh_recorder, poh_service, entry_receiver)
 }

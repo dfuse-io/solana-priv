@@ -15,6 +15,7 @@ use solana_measure::{measure::Measure, thread_mem_usage};
 use solana_metrics::{datapoint_error, inc_new_counter_debug};
 use solana_rayon_threadlimit::get_thread_count;
 use solana_runtime::{
+    accounts_index::AccountIndex,
     bank::{
         Bank, InnerInstructionsList, TransactionBalancesSet, TransactionExecutionResult,
         TransactionLogMessages, TransactionResults,
@@ -332,6 +333,7 @@ pub struct ProcessOptions {
     pub new_hard_forks: Option<Vec<Slot>>,
     pub frozen_accounts: Vec<Pubkey>,
     pub debug_keys: Option<Arc<HashSet<Pubkey>>>,
+    pub account_indexes: HashSet<AccountIndex>,
 }
 
 pub fn process_blockstore(
@@ -355,7 +357,8 @@ pub fn process_blockstore(
         account_paths,
         &opts.frozen_accounts,
         opts.debug_keys.clone(),
-        Some(&crate::builtins::get(genesis_config.cluster_type)),
+        Some(&crate::builtins::get()),
+        opts.account_indexes.clone(),
     );
     let bank0 = Arc::new(bank0);
     info!("processing ledger for slot 0...");
@@ -2906,7 +2909,14 @@ pub mod tests {
         genesis_config: &GenesisConfig,
         account_paths: Vec<PathBuf>,
     ) -> EpochSchedule {
-        let bank = Bank::new_with_paths(&genesis_config, account_paths, &[], None, None);
+        let bank = Bank::new_with_paths(
+            &genesis_config,
+            account_paths,
+            &[],
+            None,
+            None,
+            HashSet::new(),
+        );
         *bank.epoch_schedule()
     }
 
@@ -3232,7 +3242,7 @@ pub mod tests {
                         vote_state.root_slot = Some(root);
                         let mut vote_account =
                             Account::new(1, VoteState::size_of(), &solana_vote_program::id());
-                        let versioned = VoteStateVersions::Current(Box::new(vote_state));
+                        let versioned = VoteStateVersions::new_current(vote_state);
                         VoteState::serialize(&versioned, &mut vote_account.data).unwrap();
                         (
                             solana_sdk::pubkey::new_rand(),

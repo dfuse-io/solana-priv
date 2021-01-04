@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use solana_sdk::signature::Signature;
 use solana_sdk::{
     account::Account,
-    clock::Epoch,
+    account_utils::StateMut,
+    bpf_loader_upgradeable::{self, UpgradeableLoaderState},
     feature_set::{instructions_sysvar_enabled, FeatureSet},
     instruction::{CompiledInstruction, Instruction, InstructionError},
     keyed_account::{create_keyed_readonly_accounts, KeyedAccount},
@@ -54,11 +55,7 @@ pub struct PreAccount {
     key: Pubkey,
     is_signer: bool,
     is_writable: bool,
-    is_executable: bool,
-    lamports: u64,
-    data: Vec<u8>,
-    owner: Pubkey,
-    rent_epoch: Epoch,
+    account: RefCell<Account>,
 }
 impl PreAccount {
     pub fn new(key: &Pubkey, account: &Account, is_signer: bool, is_writable: bool) -> Self {
@@ -66,11 +63,7 @@ impl PreAccount {
             key: *key,
             is_signer,
             is_writable,
-            lamports: account.lamports,
-            data: account.data.clone(),
-            owner: account.owner,
-            is_executable: account.executable,
-            rent_epoch: account.rent_epoch,
+            account: RefCell::new(account.clone()),
         }
     }
 
@@ -81,41 +74,43 @@ impl PreAccount {
         post: &Account,
         dmlog_ctx: Option<DMLogContext>,
     ) -> Result<(), InstructionError> {
+        let pre = self.account.borrow();
+
         // Only the owner of the account may change owner and
         //   only if the account is writable and
         //   only if the account is not executable and
         //   only if the data is zero-initialized or empty
-        if self.owner != post.owner
+        if pre.owner != post.owner
             && (!self.is_writable // line coverage used to get branch coverage
-                || self.is_executable
-                || *program_id != self.owner
+                || pre.executable
+                || *program_id != pre.owner
             || !Self::is_zeroed(&post.data))
         {
             return Err(InstructionError::ModifiedProgramId);
         }
 
         // An account not assigned to the program cannot have its balance decrease.
-        if *program_id != self.owner // line coverage used to get branch coverage
-         && self.lamports > post.lamports
+        if *program_id != pre.owner // line coverage used to get branch coverage
+         && pre.lamports > post.lamports
         {
             return Err(InstructionError::ExternalAccountLamportSpend);
         }
 
         // The balance of read-only and executable accounts may not change
-        if self.lamports != post.lamports {
+        if pre.lamports != post.lamports {
             if !self.is_writable {
                 return Err(InstructionError::ReadonlyLamportChange);
             }
-            if self.is_executable {
+            if pre.executable {
                 return Err(InstructionError::ExecutableLamportChange);
             }
         }
 
         // Only the system program can change the size of the data
         //  and only if the system program owns the account
-        if self.data.len() != post.data.len()
+        if pre.data.len() != post.data.len()
             && (!system_program::check_id(program_id) // line coverage used to get branch coverage
-                || !system_program::check_id(&self.owner))
+                || !system_program::check_id(&pre.owner))
         {
             return Err(InstructionError::AccountDataSizeChanged);
         }
@@ -123,12 +118,12 @@ impl PreAccount {
         // Only the owner may change account data
         //   and if the account is writable
         //   and if the account is not executable
-        if !(*program_id == self.owner
+        if !(*program_id == pre.owner
             && self.is_writable  // line coverage used to get branch coverage
-            && !self.is_executable)
-            && self.data != post.data
+            && !pre.executable)
+            && pre.data != post.data
         {
-            if self.is_executable {
+            if pre.executable {
                 return Err(InstructionError::ExecutableDataModified);
             } else if self.is_writable {
                 return Err(InstructionError::ExternalAccountDataModified);
@@ -144,20 +139,20 @@ impl PreAccount {
         }
 
         // executable is one-way (false->true) and only the account owner may set it.
-        if self.is_executable != post.executable {
+        if pre.executable != post.executable {
             if !rent.is_exempt(post.lamports, post.data.len()) {
                 return Err(InstructionError::ExecutableAccountNotRentExempt);
             }
             if !self.is_writable // line coverage used to get branch coverage
-                || self.is_executable
-                || *program_id != self.owner
+                || pre.executable
+                || *program_id != pre.owner
             {
                 return Err(InstructionError::ExecutableModified);
             }
         }
 
         // No one modifies rent_epoch (yet).
-        if self.rent_epoch != post.rent_epoch {
+        if pre.rent_epoch != post.rent_epoch {
             return Err(InstructionError::RentEpochModified);
         }
 
@@ -165,14 +160,16 @@ impl PreAccount {
     }
 
     pub fn update(&mut self, account: &Account) {
-        self.lamports = account.lamports;
-        self.owner = account.owner;
-        if self.data.len() != account.data.len() {
+        let mut pre = self.account.borrow_mut();
+
+        pre.lamports = account.lamports;
+        pre.owner = account.owner;
+        if pre.data.len() != account.data.len() {
             // Only system account can change data size, copy with alloc
-            self.data = account.data.clone();
+            pre.data = account.data.clone();
         } else {
             // Copy without allocate
-            self.data.clone_from_slice(&account.data);
+            pre.data.clone_from_slice(&account.data);
         }
     }
 
@@ -181,7 +178,7 @@ impl PreAccount {
     }
 
     pub fn lamports(&self) -> u64 {
-        self.lamports
+        self.account.borrow().lamports
     }
 
     pub fn is_zeroed(buf: &[u8]) -> bool {
@@ -214,6 +211,7 @@ pub struct ThisInvokeContext<'a> {
     program_ids: Vec<Pubkey>,
     rent: Rent,
     pre_accounts: Vec<PreAccount>,
+    account_deps: &'a [(Pubkey, RefCell<Account>)],
     programs: &'a [(Pubkey, ProcessInstructionWithContext)],
     logger: Rc<RefCell<dyn Logger>>,
     bpf_compute_budget: BpfComputeBudget,
@@ -225,10 +223,12 @@ pub struct ThisInvokeContext<'a> {
 }
 
 impl<'a> ThisInvokeContext<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         program_id: &Pubkey,
         rent: Rent,
         pre_accounts: Vec<PreAccount>,
+        account_deps: &'a [(Pubkey, RefCell<Account>)],
         programs: &'a [(Pubkey, ProcessInstructionWithContext)],
         log_collector: Option<Rc<LogCollector>>,
         bpf_compute_budget: BpfComputeBudget,
@@ -245,6 +245,7 @@ impl<'a> ThisInvokeContext<'a> {
             program_ids,
             rent,
             pre_accounts,
+            account_deps,
             programs,
             logger: Rc::new(RefCell::new(ThisLogger { log_collector })),
             bpf_compute_budget,
@@ -335,6 +336,25 @@ impl<'a> InvokeContext for ThisInvokeContext<'a> {
     }
     fn is_feature_active(&self, feature_id: &Pubkey) -> bool {
         self.feature_set.is_active(feature_id)
+    }
+
+    fn get_account(&self, pubkey: &Pubkey) -> Option<RefCell<Account>> {
+        if let Some(account) = self.pre_accounts.iter().find_map(|pre| {
+            if pre.key == *pubkey {
+                Some(pre.account.clone())
+            } else {
+                None
+            }
+        }) {
+            return Some(account);
+        }
+        self.account_deps.iter().find_map(|(key, account)| {
+            if key == pubkey {
+                Some(account.clone())
+            } else {
+                None
+            }
+        })
     }
 
     fn get_dmlog_mut(&mut self) -> &mut DMLogContext {
@@ -480,18 +500,19 @@ impl MessageProcessor {
     /// This method calls the instruction's program entrypoint method
     fn process_instruction(
         &self,
+        program_id: &Pubkey,
         keyed_accounts: &[KeyedAccount],
         instruction_data: &[u8],
         invoke_context: &mut dyn InvokeContext,
     ) -> Result<(), InstructionError> {
         if let Some(root_account) = keyed_accounts.iter().next() {
+            let root_id = root_account.unsigned_key();
             if native_loader::check_id(&root_account.owner()?) {
-                let root_id = root_account.unsigned_key();
                 for (id, process_instruction) in &self.programs {
                     if id == root_id {
                         // Call the builtin program
                         return process_instruction(
-                            &root_id,
+                            &program_id,
                             &keyed_accounts[1..],
                             instruction_data,
                             invoke_context,
@@ -500,7 +521,7 @@ impl MessageProcessor {
                 }
                 // Call the program via the native loader
                 return self.native_loader.process_instruction(
-                    &native_loader::id(),
+                    program_id,
                     keyed_accounts,
                     instruction_data,
                     invoke_context,
@@ -511,7 +532,7 @@ impl MessageProcessor {
                     if id == owner_id {
                         // Call the program via a builtin loader
                         return process_instruction(
-                            &owner_id,
+                            &program_id,
                             keyed_accounts,
                             instruction_data,
                             invoke_context,
@@ -574,7 +595,7 @@ impl MessageProcessor {
         instruction: &Instruction,
         keyed_accounts: &[&KeyedAccount],
         signers: &[Pubkey],
-    ) -> Result<(Message, Pubkey, usize), InstructionError> {
+    ) -> Result<(Message, Pubkey), InstructionError> {
         // Check for privilege escalation
         for account in instruction.accounts.iter() {
             let keyed_account = keyed_accounts
@@ -617,10 +638,95 @@ impl MessageProcessor {
         let id = *message
             .program_id(0)
             .ok_or(InstructionError::MissingAccount)?;
-        let index = message
-            .program_index(0)
+        Ok((message, id))
+    }
+
+    /// Entrypoint for a cross-program invocation from a native program
+    pub fn native_invoke(
+        invoke_context: &mut dyn InvokeContext,
+        instruction: Instruction,
+        keyed_accounts: &[&KeyedAccount],
+        signers_seeds: &[&[&[u8]]],
+    ) -> Result<(), InstructionError> {
+        let caller_program_id = invoke_context.get_caller()?;
+
+        // Translate and verify caller's data
+
+        let signers = signers_seeds
+            .iter()
+            .map(|seeds| Pubkey::create_program_address(&seeds, caller_program_id))
+            .collect::<Result<Vec<_>, solana_sdk::pubkey::PubkeyError>>()?;
+        let (message, callee_program_id) =
+            Self::create_message(&instruction, &keyed_accounts, &signers)?;
+        let mut accounts = vec![];
+        let mut account_refs = vec![];
+        'root: for account_key in message.account_keys.iter() {
+            for keyed_account in keyed_accounts {
+                if account_key == keyed_account.unsigned_key() {
+                    accounts.push(Rc::new(keyed_account.account.clone()));
+                    account_refs.push(keyed_account);
+                    continue 'root;
+                }
+            }
+            return Err(InstructionError::MissingAccount);
+        }
+
+        // Process instruction
+
+        invoke_context.record_instruction(&instruction);
+
+        let program_account = invoke_context
+            .get_account(&callee_program_id)
             .ok_or(InstructionError::MissingAccount)?;
-        Ok((message, id, index))
+        if !program_account.borrow().executable {
+            return Err(InstructionError::AccountNotExecutable);
+        }
+        let programdata_executable =
+            if program_account.borrow().owner == bpf_loader_upgradeable::id() {
+                if let UpgradeableLoaderState::Program {
+                    programdata_address,
+                } = program_account.borrow().state()?
+                {
+                    if let Some(account) = invoke_context.get_account(&programdata_address) {
+                        Some((programdata_address, account))
+                    } else {
+                        return Err(InstructionError::MissingAccount);
+                    }
+                } else {
+                    return Err(InstructionError::MissingAccount);
+                }
+            } else {
+                None
+            };
+        let mut executable_accounts = vec![(callee_program_id, program_account)];
+        if let Some(programdata) = programdata_executable {
+            executable_accounts.push(programdata);
+        }
+
+        MessageProcessor::process_cross_program_instruction(
+            &message,
+            &executable_accounts,
+            &accounts,
+            invoke_context,
+        )?;
+
+        // Copy results back to caller
+
+        for (i, (account, account_ref)) in accounts.iter().zip(account_refs).enumerate() {
+            let account = account.borrow();
+            if message.is_writable(i) && !account.executable {
+                account_ref.try_account_ref_mut()?.lamports = account.lamports;
+                account_ref.try_account_ref_mut()?.owner = account.owner;
+                if account_ref.data_len()? != account.data.len() && account_ref.data_len()? != 0 {
+                    // Only support for `CreateAccount` at this time.
+                    // Need a way to limit total realloc size across multiple CPI calls
+                    return Err(InstructionError::InvalidRealloc);
+                }
+                account_ref.try_account_ref_mut()?.data = account.data.clone();
+            }
+        }
+
+        Ok(())
     }
 
     /// Process a cross-program instruction
@@ -632,6 +738,8 @@ impl MessageProcessor {
         invoke_context: &mut dyn InvokeContext,
     ) -> Result<(), InstructionError> {
         if let Some(instruction) = message.instructions.get(0) {
+            let program_id = instruction.program_id(&message.account_keys);
+
             // Verify the calling program hasn't misbehaved
             invoke_context.verify_and_update(message, instruction, accounts, false)?;
 
@@ -642,6 +750,7 @@ impl MessageProcessor {
             let program_id = instruction.program_id(&message.account_keys);
             // Invoke callee
             invoke_context.push(program_id)?;
+
             //*********************************************************************************
             // DMLOG: This is the call entry point for inner instruction
             // 1) Store the current parent ordinal number to restore after the inner call is completed
@@ -661,6 +770,7 @@ impl MessageProcessor {
             }
 
             let mut result = message_processor.process_instruction(
+                program_id,
                 &keyed_accounts,
                 &instruction.data,
                 invoke_context,
@@ -830,6 +940,7 @@ impl MessageProcessor {
         instruction: &CompiledInstruction,
         executable_accounts: &[(Pubkey, RefCell<Account>)],
         accounts: &[Rc<RefCell<Account>>],
+        account_deps: &[(Pubkey, RefCell<Account>)],
         rent_collector: &RentCollector,
         log_collector: Option<Rc<LogCollector>>,
         executors: Rc<RefCell<Executors>>,
@@ -856,11 +967,12 @@ impl MessageProcessor {
             }
         }
         let pre_accounts = Self::create_pre_accounts(message, instruction, accounts);
-        let root_program_id = instruction.program_id(&message.account_keys);
+        let program_id = instruction.program_id(&message.account_keys);
         let mut invoke_context = ThisInvokeContext::new(
-            root_program_id,
+            program_id,
             rent_collector.rent,
             pre_accounts,
+            account_deps,
             &self.programs,
             log_collector,
             bpf_compute_budget,
@@ -881,7 +993,13 @@ impl MessageProcessor {
         dmlog_ctx.inc_ordinal_number();
         dmlog_ctx.print_instruction_start(*root_program_id, &keyed_accounts, &instruction.data);
         //****************************************************************
-        self.process_instruction(&keyed_accounts, &instruction.data, &mut invoke_context)?;
+
+        self.process_instruction(
+            program_id,
+            &keyed_accounts,
+            &instruction.data,
+            &mut invoke_context,
+        )?;
         Self::verify(
             message,
             instruction,
@@ -905,6 +1023,7 @@ impl MessageProcessor {
         message: &Message,
         loaders: &[Vec<(Pubkey, RefCell<Account>)>],
         accounts: &[Rc<RefCell<Account>>],
+        account_deps: &[(Pubkey, RefCell<Account>)],
         rent_collector: &RentCollector,
         log_collector: Option<Rc<LogCollector>>,
         executors: Rc<RefCell<Executors>>,
@@ -919,24 +1038,24 @@ impl MessageProcessor {
             let instruction_recorder = instruction_recorders
                 .as_ref()
                 .map(|recorders| recorders[instruction_index].clone());
-            dmlog_last_ordinal_number = self
-                .execute_instruction(
-                    message,
-                    instruction,
-                    &loaders[instruction_index],
-                    accounts,
-                    rent_collector,
-                    log_collector.clone(),
-                    executors.clone(),
-                    instruction_recorder,
-                    instruction_index,
-                    feature_set.clone(),
-                    bpf_compute_budget,
-                    dmlog_trx_id,
-                    dmlog_last_ordinal_number,
-                    dmlog_slot_num,
-                )
-                .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
+            dmlog_last_ordinal_number = self.execute_instruction(
+                message,
+                instruction,
+                &loaders[instruction_index],
+                accounts,
+                account_deps,
+                rent_collector,
+                log_collector.clone(),
+                executors.clone(),
+                instruction_recorder,
+                instruction_index,
+                feature_set.clone(),
+                bpf_compute_budget,
+                dmlog_trx_id,
+                dmlog_last_ordinal_number,
+                dmlog_slot_num,
+            )
+            .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
         }
         Ok(())
     }
@@ -984,6 +1103,7 @@ mod tests {
             Rent::default(),
             pre_accounts,
             &[],
+            &[],
             None,
             BpfComputeBudget::default(),
             Rc::new(RefCell::new(Executors::default())),
@@ -1027,7 +1147,10 @@ mod tests {
                 .verify_and_update(&message, &message.instructions[0], &these_accounts)
                 .unwrap();
             assert_eq!(
-                invoke_context.pre_accounts[owned_index].data[0],
+                invoke_context.pre_accounts[owned_index]
+                    .account
+                    .borrow()
+                    .data[0],
                 (MAX_DEPTH + owned_index) as u8
             );
 
@@ -1042,7 +1165,13 @@ mod tests {
                 ),
                 Err(InstructionError::ExternalAccountDataModified)
             );
-            assert_eq!(invoke_context.pre_accounts[not_owned_index].data[0], data);
+            assert_eq!(
+                invoke_context.pre_accounts[not_owned_index]
+                    .account
+                    .borrow()
+                    .data[0],
+                data
+            );
             accounts[not_owned_index].borrow_mut().data[0] = data;
 
             invoke_context.pop();
@@ -1121,12 +1250,12 @@ mod tests {
             self
         }
         pub fn executable(mut self, pre: bool, post: bool) -> Self {
-            self.pre.is_executable = pre;
+            self.pre.account.borrow_mut().executable = pre;
             self.post.executable = post;
             self
         }
         pub fn lamports(mut self, pre: u64, post: u64) -> Self {
-            self.pre.lamports = pre;
+            self.pre.account.borrow_mut().lamports = pre;
             self.post.lamports = post;
             self
         }
@@ -1135,12 +1264,12 @@ mod tests {
             self
         }
         pub fn data(mut self, pre: Vec<u8>, post: Vec<u8>) -> Self {
-            self.pre.data = pre;
+            self.pre.account.borrow_mut().data = pre;
             self.post.data = post;
             self
         }
         pub fn rent_epoch(mut self, pre: u64, post: u64) -> Self {
-            self.pre.rent_epoch = pre;
+            self.pre.account.borrow_mut().rent_epoch = pre;
             self.post.rent_epoch = post;
             self
         }
@@ -1537,6 +1666,7 @@ mod tests {
             &message,
             &loaders,
             &accounts,
+            &[],
             &rent_collector,
             None,
             executors.clone(),
@@ -1563,6 +1693,7 @@ mod tests {
             &message,
             &loaders,
             &accounts,
+            &[],
             &rent_collector,
             None,
             executors.clone(),
@@ -1593,6 +1724,7 @@ mod tests {
             &message,
             &loaders,
             &accounts,
+            &[],
             &rent_collector,
             None,
             executors,
@@ -1707,6 +1839,7 @@ mod tests {
             &message,
             &loaders,
             &accounts,
+            &[],
             &rent_collector,
             None,
             executors.clone(),
@@ -1737,6 +1870,7 @@ mod tests {
             &message,
             &loaders,
             &accounts,
+            &[],
             &rent_collector,
             None,
             executors.clone(),
@@ -1764,6 +1898,7 @@ mod tests {
             &message,
             &loaders,
             &accounts,
+            &[],
             &rent_collector,
             None,
             executors,
@@ -1852,6 +1987,7 @@ mod tests {
                 not_owned_preaccount,
                 executable_preaccount,
             ],
+            &[],
             programs.as_slice(),
             None,
             BpfComputeBudget::default(),

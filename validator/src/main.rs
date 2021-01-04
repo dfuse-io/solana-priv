@@ -5,7 +5,7 @@ use clap::{
 use log::*;
 use rand::{thread_rng, Rng};
 use solana_clap_utils::{
-    input_parsers::{keypair_of, keypairs_of, pubkey_of},
+    input_parsers::{keypair_of, keypairs_of, pubkey_of, value_of},
     input_validators::{
         is_keypair_or_ask_keyword, is_parsable, is_pubkey, is_pubkey_or_keypair, is_slot,
     },
@@ -19,6 +19,7 @@ use solana_core::{
     cluster_info::{ClusterInfo, Node, MINIMUM_VALIDATOR_PORT_RANGE_WIDTH, VALIDATOR_PORT_RANGE},
     contact_info::ContactInfo,
     gossip_service::GossipService,
+    poh_service,
     rpc::JsonRpcConfig,
     rpc_pubsub_service::PubSubConfig,
     validator::{Validator, ValidatorConfig},
@@ -27,6 +28,7 @@ use solana_download_utils::{download_genesis_if_missing, download_snapshot};
 use solana_ledger::blockstore_db::BlockstoreRecoveryMode;
 use solana_perf::recycler::enable_recycler_warming;
 use solana_runtime::{
+    accounts_index::AccountIndex,
     bank_forks::{CompressionType, SnapshotConfig, SnapshotVersion},
     hardened_unpack::{unpack_genesis_archive, MAX_GENESIS_ARCHIVE_UNPACKED_SIZE},
     snapshot_utils::get_highest_snapshot_archive_path,
@@ -732,10 +734,21 @@ fn rpc_bootstrap(
                     get_highest_snapshot_archive_path(ledger_path)
                         .map(|(_path, (slot, _hash, _compression))| slot)
                 {
-                    if highest_local_snapshot_slot > snapshot_hash.0.saturating_sub(maximum_local_snapshot_age) {
-                        info!("Reusing local snapshot at slot {} instead of downloading a newer snapshot for slot {}",
-                              highest_local_snapshot_slot, snapshot_hash.0);
+                    if highest_local_snapshot_slot
+                        > snapshot_hash.0.saturating_sub(maximum_local_snapshot_age)
+                    {
+                        info!(
+                            "Reusing local snapshot at slot {} instead \
+                               of downloading a newer snapshot for slot {}",
+                            highest_local_snapshot_slot, snapshot_hash.0
+                        );
                         use_local_snapshot = true;
+                    } else {
+                        info!(
+                            "Local snapshot from slot {} is too old. \
+                              Downloading a newer snapshot for slot {}",
+                            highest_local_snapshot_slot, snapshot_hash.0
+                        );
                     }
                 }
 
@@ -1158,6 +1171,11 @@ pub fn main() {
                       0 to disable snapshots"),
         )
         .arg(
+            Arg::with_name("no_poh_speed_test")
+                .long("no-poh-speed-test")
+                .help("Skip the check for PoH speed."),
+        )
+        .arg(
             Arg::with_name("accounts_hash_interval_slots")
                 .long("accounts-hash-slots")
                 .value_name("ACCOUNTS_HASH_INTERVAL_SLOTS")
@@ -1444,6 +1462,31 @@ pub fn main() {
                 .hidden(true) // Don't document this argument. It's a stub for v1.5 forward compatibility
         )
         .arg(
+            Arg::with_name("poh_pinned_cpu_core")
+                .hidden(true)
+                .long("experimental-poh-pinned-cpu-core")
+                .takes_value(true)
+                .value_name("CPU_CORE_INDEX")
+                .validator(|s| {
+                    let core_index = usize::from_str(&s).map_err(|e| e.to_string())?;
+                    let max_index = core_affinity::get_core_ids().map(|cids| cids.len() - 1).unwrap_or(0);
+                    if core_index > max_index {
+                        return Err(format!("core index must be in the range [0, {}]", max_index));
+                    }
+                    Ok(())
+                })
+                .help("EXPERIMENTAL: Specify which CPU core PoH is pinned to"),
+        )
+        .arg(
+            Arg::with_name("account_indexes")
+                .long("account-index")
+                .takes_value(true)
+                .multiple(true)
+                .possible_values(&["program-id", "spl-token-owner", "spl-token-mint"])
+                .value_name("INDEX")
+                .help("Enable an accounts index, indexed by the selected account field"),
+        )
+        .arg(
             Arg::with_name("deepmind")
                 .long("--deepmind")
                 .takes_value(false)
@@ -1532,6 +1575,17 @@ pub fn main() {
         bind_address
     };
 
+    let account_indexes: HashSet<AccountIndex> = matches
+        .values_of("account_indexes")
+        .unwrap_or_default()
+        .map(|value| match value {
+            "program-id" => AccountIndex::ProgramId,
+            "spl-token-mint" => AccountIndex::SplTokenMint,
+            "spl-token-owner" => AccountIndex::SplTokenOwner,
+            _ => unreachable!(),
+        })
+        .collect();
+
     let restricted_repair_only_mode = matches.is_present("restricted_repair_only_mode");
     let mut validator_config = ValidatorConfig {
         require_tower: matches.is_present("require_tower"),
@@ -1566,6 +1620,7 @@ pub fn main() {
                 "health_check_slot_distance",
                 u64
             ),
+            account_indexes: account_indexes.clone(),
         },
         rpc_addrs: value_t!(matches, "rpc_port", u16).ok().map(|rpc_port| {
             (
@@ -1607,6 +1662,10 @@ pub fn main() {
             "rpc_send_transaction_leader_forward_count",
             u64
         ),
+        no_poh_speed_test: matches.is_present("no_poh_speed_test"),
+        poh_pinned_cpu_core: value_of(&matches, "poh_pinned_cpu_core")
+            .unwrap_or(poh_service::DEFAULT_PINNED_CPU_CORE),
+        account_indexes,
         ..ValidatorConfig::default()
     };
 

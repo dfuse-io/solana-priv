@@ -13,7 +13,7 @@ use crate::{
         OptimisticallyConfirmedBank, OptimisticallyConfirmedBankTracker,
     },
     poh_recorder::{PohRecorder, GRACE_TICKS_FACTOR, MAX_GRACE_SLOTS},
-    poh_service::PohService,
+    poh_service::{self, PohService},
     rewards_recorder_service::{RewardsRecorderSender, RewardsRecorderService},
     rpc::JsonRpcConfig,
     rpc_pubsub_service::{PubSubConfig, PubSubService},
@@ -37,10 +37,12 @@ use solana_ledger::{
     blockstore_processor::{self, TransactionStatusSender},
     leader_schedule::FixedSchedule,
     leader_schedule_cache::LeaderScheduleCache,
+    poh::compute_hash_time_ns,
 };
 use solana_measure::measure::Measure;
 use solana_metrics::datapoint_info;
 use solana_runtime::{
+    accounts_index::AccountIndex,
     bank::Bank,
     bank_forks::{BankForks, SnapshotConfig},
     commitment::BlockCommitmentCache,
@@ -62,7 +64,6 @@ use std::{
     collections::HashSet,
     net::SocketAddr,
     path::{Path, PathBuf},
-    process,
     sync::atomic::{AtomicBool, Ordering},
     sync::mpsc::Receiver,
     sync::{mpsc::channel, Arc, Mutex, RwLock},
@@ -107,6 +108,9 @@ pub struct ValidatorConfig {
     pub debug_keys: Option<Arc<HashSet<Pubkey>>>,
     pub send_transaction_retry_ms: u64,
     pub send_transaction_leader_forward_count: u64,
+    pub no_poh_speed_test: bool,
+    pub poh_pinned_cpu_core: usize,
+    pub account_indexes: HashSet<AccountIndex>,
 }
 
 impl Default for ValidatorConfig {
@@ -145,6 +149,9 @@ impl Default for ValidatorConfig {
             debug_keys: None,
             send_transaction_retry_ms: 2000,
             send_transaction_leader_forward_count: 2,
+            no_poh_speed_test: true,
+            poh_pinned_cpu_core: poh_service::DEFAULT_PINNED_CPU_CORE,
+            account_indexes: HashSet::new(),
         }
     }
 }
@@ -201,6 +208,15 @@ pub struct Validator {
     ip_echo_server: solana_net_utils::IpEchoServer,
 }
 
+// in the distant future, get rid of ::new()/exit() and use Result properly...
+fn abort() -> ! {
+    #[cfg(not(test))]
+    std::process::exit(1);
+
+    #[cfg(test)]
+    panic!("process::exit(1) is intercepted for friendly test failure...");
+}
+
 impl Validator {
     pub fn new(
         mut node: Node,
@@ -242,7 +258,7 @@ impl Validator {
                 "ledger directory does not exist or is not accessible: {:?}",
                 ledger_path
             );
-            process::exit(1);
+            abort();
         }
 
         if let Some(shred_version) = config.expected_shred_version {
@@ -341,7 +357,7 @@ impl Validator {
                     "shred version mismatch: expected {} found: {}",
                     expected_shred_version, node.info.shred_version,
                 );
-                process::exit(1);
+                abort();
             }
         }
 
@@ -507,11 +523,21 @@ impl Validator {
                 (None, None)
             };
 
-        if wait_for_supermajority(config, &bank, &cluster_info, rpc_override_health_check) {
-            std::process::exit(1);
+        if !config.no_poh_speed_test {
+            check_poh_speed(&genesis_config, None);
         }
 
-        let poh_service = PohService::new(poh_recorder.clone(), &poh_config, &exit);
+        if wait_for_supermajority(config, &bank, &cluster_info, rpc_override_health_check) {
+            abort();
+        }
+
+        let poh_service = PohService::new(
+            poh_recorder.clone(),
+            &poh_config,
+            &exit,
+            bank.ticks_per_slot(),
+            config.poh_pinned_cpu_core,
+        );
         assert_eq!(
             blockstore.new_shreds_signals.len(),
             1,
@@ -716,6 +742,35 @@ fn active_vote_account_exists_in_bank(bank: &Arc<Bank>, vote_account: &Pubkey) -
     false
 }
 
+fn check_poh_speed(genesis_config: &GenesisConfig, maybe_hash_samples: Option<u64>) {
+    if let Some(hashes_per_tick) = genesis_config.hashes_per_tick() {
+        let ticks_per_slot = genesis_config.ticks_per_slot();
+        let hashes_per_slot = hashes_per_tick * ticks_per_slot;
+
+        let hash_samples = maybe_hash_samples.unwrap_or(hashes_per_slot);
+        let hash_time_ns = compute_hash_time_ns(hash_samples);
+
+        let my_ns_per_slot = (hash_time_ns * hashes_per_slot) / hash_samples;
+        debug!("computed: ns_per_slot: {}", my_ns_per_slot);
+        let target_ns_per_slot = genesis_config.ns_per_slot() as u64;
+        debug!(
+            "cluster ns_per_hash: {}ns ns_per_slot: {}",
+            target_ns_per_slot / hashes_per_slot,
+            target_ns_per_slot
+        );
+        if my_ns_per_slot < target_ns_per_slot {
+            let extra_ns = target_ns_per_slot - my_ns_per_slot;
+            info!("PoH speed check: Will sleep {}ns per slot.", extra_ns);
+        } else {
+            error!(
+                "PoH is slower than cluster target tick rate! mine: {} cluster: {}. If you wish to continue, try --no-poh-speed-test",
+                my_ns_per_slot, target_ns_per_slot,
+            );
+            abort();
+        }
+    }
+}
+
 fn post_process_restored_tower(
     restored_tower: crate::consensus::Result<Tower>,
     validator_identity: &Pubkey,
@@ -776,7 +831,7 @@ fn post_process_restored_tower(
                     "And there is an existing vote_account containing actual votes. \
                      Aborting due to possible conflicting duplicate votes",
                 );
-                process::exit(1);
+                abort();
             }
             if err.is_file_missing() && !voting_has_been_active {
                 // Currently, don't protect against spoofed snapshots with no tower at all
@@ -836,7 +891,7 @@ fn new_banks_from_ledger(
         if genesis_hash != expected_genesis_hash {
             error!("genesis hash mismatch: expected {}", expected_genesis_hash);
             error!("Delete the ledger directory to continue: {:?}", ledger_path);
-            process::exit(1);
+            abort();
         }
     }
 
@@ -853,7 +908,7 @@ fn new_banks_from_ledger(
     if let Ok(tower) = &restored_tower {
         reconcile_blockstore_roots_with_tower(&tower, &blockstore).unwrap_or_else(|err| {
             error!("Failed to reconcile blockstore with tower: {:?}", err);
-            std::process::exit(1);
+            abort()
         });
     }
 
@@ -863,6 +918,7 @@ fn new_banks_from_ledger(
         new_hard_forks: config.new_hard_forks.clone(),
         frozen_accounts: config.frozen_accounts.clone(),
         debug_keys: config.debug_keys.clone(),
+        account_indexes: config.account_indexes.clone(),
         ..blockstore_processor::ProcessOptions::default()
     };
 
@@ -887,7 +943,7 @@ fn new_banks_from_ledger(
     )
     .unwrap_or_else(|err| {
         error!("Failed to load ledger: {:?}", err);
-        process::exit(1);
+        abort()
     });
 
     let tower = post_process_restored_tower(
@@ -1109,7 +1165,7 @@ unsafe fn check_avx() {
         error!(
             "Your machine does not have AVX support, please rebuild from source on your machine"
         );
-        process::exit(1);
+        abort();
     }
 }
 
@@ -1213,6 +1269,8 @@ fn cleanup_accounts_path(account_path: &std::path::Path) {
 mod tests {
     use super::*;
     use solana_ledger::{create_new_tmp_ledger, genesis_utils::create_genesis_config_with_leader};
+    use solana_sdk::genesis_config::create_genesis_config;
+    use solana_sdk::poh_config::PohConfig;
     use std::fs::remove_dir_all;
 
     #[test]
@@ -1331,7 +1389,6 @@ mod tests {
     #[test]
     fn test_wait_for_supermajority() {
         solana_logger::setup();
-        use solana_sdk::genesis_config::create_genesis_config;
         use solana_sdk::hash::hash;
         let node_keypair = Arc::new(Keypair::new());
         let cluster_info = ClusterInfo::new(
@@ -1378,5 +1435,39 @@ mod tests {
             &cluster_info,
             rpc_override_health_check
         ));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_poh_speed() {
+        solana_logger::setup();
+        let poh_config = PohConfig {
+            target_tick_duration: Duration::from_millis(solana_sdk::clock::MS_PER_TICK),
+            // make PoH rate really fast to cause the panic condition
+            hashes_per_tick: Some(
+                100 * solana_sdk::clock::DEFAULT_HASHES_PER_SECOND
+                    / solana_sdk::clock::DEFAULT_TICKS_PER_SECOND,
+            ),
+            ..PohConfig::default()
+        };
+        let genesis_config = GenesisConfig {
+            poh_config,
+            ..GenesisConfig::default()
+        };
+        check_poh_speed(&genesis_config, Some(10_000));
+    }
+
+    #[test]
+    fn test_poh_speed_no_hashes_per_tick() {
+        let poh_config = PohConfig {
+            target_tick_duration: Duration::from_millis(solana_sdk::clock::MS_PER_TICK),
+            hashes_per_tick: None,
+            ..PohConfig::default()
+        };
+        let genesis_config = GenesisConfig {
+            poh_config,
+            ..GenesisConfig::default()
+        };
+        check_poh_speed(&genesis_config, Some(10_000));
     }
 }

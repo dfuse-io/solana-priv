@@ -67,7 +67,8 @@ pub fn load(
                     compression,
                     genesis_config,
                     process_options.debug_keys.clone(),
-                    Some(&crate::builtins::get(genesis_config.cluster_type)),
+                    Some(&crate::builtins::get()),
+                    process_options.account_indexes.clone(),
                 )
                 .expect("Load from snapshot failed");
                 if let Some(shrink_paths) = shrink_paths {

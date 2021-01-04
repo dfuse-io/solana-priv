@@ -4,14 +4,15 @@
 //! already been signed and verified.
 use crate::{
     accounts::{
-        AccountAddressFilter, Accounts, TransactionAccounts, TransactionLoadResult,
-        TransactionLoaders,
+        AccountAddressFilter, Accounts, TransactionAccountDeps, TransactionAccounts,
+        TransactionLoadResult, TransactionLoaders,
     },
     accounts_db::{ErrorCounters, SnapshotStorages},
-    accounts_index::Ancestors,
+    accounts_index::{AccountIndex, Ancestors, IndexKey},
     blockhash_queue::BlockhashQueue,
     builtins::{self, ActivationType},
     epoch_stakes::{EpochStakes, NodeVoteAccounts},
+    inline_spl_token_v2_0,
     instruction_recorder::InstructionRecorder,
     log_collector::LogCollector,
     message_processor::{Executors, MessageProcessor},
@@ -87,37 +88,15 @@ use std::{
     time::Duration,
 };
 
-// Partial SPL Token v2.0.x declarations inlined to avoid an external dependency on the spl-token crate
-pub mod inline_spl_token_v2_0 {
-    solana_sdk::declare_id!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-    pub mod native_mint {
-        solana_sdk::declare_id!("So11111111111111111111111111111111111111112");
-
-        /*
-            Mint {
-                mint_authority: COption::None,
-                supply: 0,
-                decimals: 9,
-                is_initialized: true,
-                freeze_authority: COption::None,
-            }
-        */
-        pub const ACCOUNT_DATA: [u8; 82] = [
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        ];
-    }
-}
-
 pub const SECONDS_PER_YEAR: f64 = 365.25 * 24.0 * 60.0 * 60.0;
 
 pub const MAX_LEADER_SCHEDULE_STAKES: Epoch = 5;
 
 type BankStatusCache = StatusCache<Result<()>>;
-#[frozen_abi(digest = "9b9RfyiGPNGcMyP78YSD799ghJSTsGvqHTsJtQo8uqGX")]
+#[frozen_abi(digest = "GSPuprru1pomsgvopKG7XRWiXdqdXJdLPkgJ2arPbkXM")]
 pub type BankSlotDelta = SlotDelta<Result<()>>;
 type TransactionAccountRefCells = Vec<Rc<RefCell<Account>>>;
+type TransactionAccountDepRefCells = Vec<(Pubkey, RefCell<Account>)>;
 type TransactionLoaderRefCells = Vec<Vec<(Pubkey, RefCell<Account>)>>;
 
 // Eager rent collection repeats in cyclic manner.
@@ -863,7 +842,22 @@ impl Default for BlockhashQueue {
 
 impl Bank {
     pub fn new(genesis_config: &GenesisConfig) -> Self {
-        Self::new_with_paths(&genesis_config, Vec::new(), &[], None, None)
+        Self::new_with_paths(&genesis_config, Vec::new(), &[], None, None, HashSet::new())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_indexes(
+        genesis_config: &GenesisConfig,
+        account_indexes: HashSet<AccountIndex>,
+    ) -> Self {
+        Self::new_with_paths(
+            &genesis_config,
+            Vec::new(),
+            &[],
+            None,
+            None,
+            account_indexes,
+        )
     }
 
     pub fn new_with_paths(
@@ -872,13 +866,18 @@ impl Bank {
         frozen_account_pubkeys: &[Pubkey],
         debug_keys: Option<Arc<HashSet<Pubkey>>>,
         additional_builtins: Option<&Builtins>,
+        account_indexes: HashSet<AccountIndex>,
     ) -> Self {
         let mut bank = Self::default();
         bank.transaction_debug_keys = debug_keys;
         bank.cluster_type = Some(genesis_config.cluster_type);
         bank.ancestors.insert(bank.slot(), 0);
 
-        bank.rc.accounts = Arc::new(Accounts::new(paths, &genesis_config.cluster_type));
+        bank.rc.accounts = Arc::new(Accounts::new_with_indexes(
+            paths,
+            &genesis_config.cluster_type,
+            account_indexes,
+        ));
         bank.process_genesis_config(genesis_config);
         bank.finish_init(genesis_config, additional_builtins);
 
@@ -1303,12 +1302,13 @@ impl Bank {
                 } else {
                     (EstimateType::Unbounded, None)
                 };
+
+            let ancestor_timestamp = self.clock().unix_timestamp;
             if let Some(timestamp_estimate) =
                 self.get_timestamp_estimate(estimate_type, epoch_start_timestamp)
             {
                 if timestamp_estimate > unix_timestamp {
                     unix_timestamp = timestamp_estimate;
-                    let ancestor_timestamp = self.clock().unix_timestamp;
                     if self
                         .feature_set
                         .is_active(&feature_set::timestamp_bounding::id())
@@ -1316,15 +1316,15 @@ impl Bank {
                     {
                         unix_timestamp = ancestor_timestamp;
                     }
-                    datapoint_info!(
-                        "bank-timestamp-correction",
-                        ("slot", self.slot(), i64),
-                        ("from_genesis", unix_timestamp, i64),
-                        ("corrected", timestamp_estimate, i64),
-                        ("ancestor_timestamp", ancestor_timestamp, i64),
-                    );
                 }
             }
+            datapoint_info!(
+                "bank-timestamp-correction",
+                ("slot", self.slot(), i64),
+                ("from_genesis", self.unix_timestamp_from_genesis(), i64),
+                ("corrected", unix_timestamp, i64),
+                ("ancestor_timestamp", ancestor_timestamp, i64),
+            );
         }
         let epoch_start_timestamp = if self
             .feature_set
@@ -2643,11 +2643,20 @@ impl Bank {
     /// ownership by draining the source
     fn accounts_to_refcells(
         accounts: &mut TransactionAccounts,
+        account_deps: &mut TransactionAccountDeps,
         loaders: &mut TransactionLoaders,
-    ) -> (TransactionAccountRefCells, TransactionLoaderRefCells) {
+    ) -> (
+        TransactionAccountRefCells,
+        TransactionAccountDepRefCells,
+        TransactionLoaderRefCells,
+    ) {
         let account_refcells: Vec<_> = accounts
             .drain(..)
             .map(|account| Rc::new(RefCell::new(account)))
+            .collect();
+        let account_dep_refcells: Vec<_> = account_deps
+            .drain(..)
+            .map(|(pubkey, account_dep)| (pubkey, RefCell::new(account_dep)))
             .collect();
         let loader_refcells: Vec<Vec<_>> = loaders
             .iter_mut()
@@ -2657,7 +2666,7 @@ impl Bank {
                     .collect()
             })
             .collect();
-        (account_refcells, loader_refcells)
+        (account_refcells, account_dep_refcells, loader_refcells)
     }
 
     /// Converts back from RefCell<Account> to Account, this involves moving
@@ -2810,13 +2819,13 @@ impl Bank {
             .zip(OrderedIterator::new(txs, batch.iteration_order()))
             .map(|(accs, (_, tx))| match accs {
                 (Err(e), _nonce_rollback) => (Err(e.clone()), None),
-                (Ok((accounts, loaders, _rents)), nonce_rollback) => {
+                (Ok((accounts, account_deps, loaders, _rents)), nonce_rollback) => {
                     signature_count += u64::from(tx.message().header.num_required_signatures);
 
                     let executors = self.get_executors(&tx.message, &loaders);
 
-                    let (account_refcells, loader_refcells) =
-                        Self::accounts_to_refcells(accounts, loaders);
+                    let (account_refcells, account_dep_refcells, loader_refcells) =
+                        Self::accounts_to_refcells(accounts, account_deps, loaders);
 
                     let instruction_recorders = if enable_cpi_recording {
                         let ix_count = tx.message.instructions.len();
@@ -2854,6 +2863,7 @@ impl Bank {
                         tx.message(),
                         &loader_refcells,
                         &account_refcells,
+                        &account_dep_refcells,
                         &self.rent_collector,
                         log_collector.clone(),
                         executors.clone(),
@@ -3284,7 +3294,7 @@ impl Bank {
 
             let acc = raccs.as_ref().unwrap();
 
-            collected_rent += acc.2;
+            collected_rent += acc.3;
         }
 
         self.collected_rent.fetch_add(collected_rent, Relaxed);
@@ -3952,6 +3962,26 @@ impl Bank {
             .load_by_program(&self.ancestors, program_id)
     }
 
+    pub fn get_filtered_program_accounts<F: Fn(&Account) -> bool>(
+        &self,
+        program_id: &Pubkey,
+        filter: F,
+    ) -> Vec<(Pubkey, Account)> {
+        self.rc
+            .accounts
+            .load_by_program_with_filter(&self.ancestors, program_id, filter)
+    }
+
+    pub fn get_filtered_indexed_accounts<F: Fn(&Account) -> bool>(
+        &self,
+        index_key: &IndexKey,
+        filter: F,
+    ) -> Vec<(Pubkey, Account)> {
+        self.rc
+            .accounts
+            .load_by_index_key_with_filter(&self.ancestors, index_key, filter)
+    }
+
     pub fn get_all_accounts_with_modified_slots(&self) -> Vec<(Pubkey, Account, Slot)> {
         self.rc.accounts.load_all(&self.ancestors)
     }
@@ -4393,12 +4423,14 @@ impl Bank {
         let block_height = self.block_height();
         let (epoch, slot_index) = self.get_epoch_and_slot_index(absolute_slot);
         let slots_in_epoch = self.get_slots_in_epoch(epoch);
+        let transaction_count = Some(self.transaction_count());
         EpochInfo {
             epoch,
             slot_index,
             slots_in_epoch,
             absolute_slot,
             block_height,
+            transaction_count,
         }
     }
 
@@ -6646,7 +6678,7 @@ pub(crate) mod tests {
             .accounts
             .accounts_db
             .accounts_index
-            .purge(&zero_lamport_pubkey);
+            .purge_roots(&zero_lamport_pubkey);
 
         let some_slot = 1000;
         let bank2_with_zero = Arc::new(Bank::new_from_parent(
@@ -8622,6 +8654,53 @@ pub(crate) mod tests {
         bank3.squash();
         assert_eq!(bank1.get_program_accounts(&program_id).len(), 2);
         assert_eq!(bank3.get_program_accounts(&program_id).len(), 2);
+    }
+
+    #[test]
+    fn test_get_filtered_indexed_accounts() {
+        let (genesis_config, _mint_keypair) = create_genesis_config(500);
+        let mut account_indexes = HashSet::new();
+        account_indexes.insert(AccountIndex::ProgramId);
+        let bank = Arc::new(Bank::new_with_indexes(&genesis_config, account_indexes));
+
+        let address = Pubkey::new_unique();
+        let program_id = Pubkey::new_unique();
+        let account = Account::new(1, 0, &program_id);
+        bank.store_account(&address, &account);
+
+        let indexed_accounts =
+            bank.get_filtered_indexed_accounts(&IndexKey::ProgramId(program_id), |_| true);
+        assert_eq!(indexed_accounts.len(), 1);
+        assert_eq!(indexed_accounts[0], (address, account));
+
+        // Even though the account is re-stored in the bank (and the index) under a new program id,
+        // it is still present in the index under the original program id as well. This
+        // demonstrates the need for a redundant post-processing filter.
+        let another_program_id = Pubkey::new_unique();
+        let new_account = Account::new(1, 0, &another_program_id);
+        let bank = Arc::new(new_from_parent(&bank));
+        bank.store_account(&address, &new_account);
+        let indexed_accounts =
+            bank.get_filtered_indexed_accounts(&IndexKey::ProgramId(program_id), |_| true);
+        assert_eq!(indexed_accounts.len(), 1);
+        assert_eq!(indexed_accounts[0], (address, new_account.clone()));
+        let indexed_accounts =
+            bank.get_filtered_indexed_accounts(&IndexKey::ProgramId(another_program_id), |_| true);
+        assert_eq!(indexed_accounts.len(), 1);
+        assert_eq!(indexed_accounts[0], (address, new_account.clone()));
+
+        // Post-processing filter
+        let indexed_accounts = bank
+            .get_filtered_indexed_accounts(&IndexKey::ProgramId(program_id), |account| {
+                account.owner == program_id
+            });
+        assert!(indexed_accounts.is_empty());
+        let indexed_accounts = bank
+            .get_filtered_indexed_accounts(&IndexKey::ProgramId(another_program_id), |account| {
+                account.owner == another_program_id
+            });
+        assert_eq!(indexed_accounts.len(), 1);
+        assert_eq!(indexed_accounts[0], (address, new_account));
     }
 
     #[test]
@@ -10768,7 +10847,7 @@ pub(crate) mod tests {
         let mut vote_account = bank.get_account(vote_pubkey).unwrap_or_default();
         let mut vote_state = VoteState::from(&vote_account).unwrap_or_default();
         vote_state.last_timestamp = timestamp;
-        let versioned = VoteStateVersions::Current(Box::new(vote_state));
+        let versioned = VoteStateVersions::new_current(vote_state);
         VoteState::to(&versioned, &mut vote_account).unwrap();
         bank.store_account(vote_pubkey, &vote_account);
     }
@@ -10979,6 +11058,7 @@ pub(crate) mod tests {
             &[],
             None,
             Some(&builtins),
+            HashSet::new(),
         ));
         // move to next epoch to create now deprecated rewards sysvar intentionally
         let bank1 = Arc::new(Bank::new_from_parent(
