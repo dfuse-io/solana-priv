@@ -133,8 +133,8 @@ impl PreAccount {
         }
 
         if let Some(dmlog_ctx) = dmlog_ctx {
-            if self.is_writable && (self.data != post.data) {
-                dmlog_ctx.print_account_change(self.key, &self.data, &post.data)
+            if self.is_writable && (pre.data != post.data) {
+                dmlog_ctx.print_account_change(self.key, &pre.data, &post.data)
             }
         }
 
@@ -747,7 +747,6 @@ impl MessageProcessor {
             let keyed_accounts =
                 Self::create_keyed_accounts(message, instruction, executable_accounts, accounts)?;
 
-            let program_id = instruction.program_id(&message.account_keys);
             // Invoke callee
             invoke_context.push(program_id)?;
 
@@ -991,7 +990,7 @@ impl MessageProcessor {
         //****************************************************************
         let dmlog_ctx = invoke_context.get_dmlog_mut();
         dmlog_ctx.inc_ordinal_number();
-        dmlog_ctx.print_instruction_start(*root_program_id, &keyed_accounts, &instruction.data);
+        dmlog_ctx.print_instruction_start(*program_id, &keyed_accounts, &instruction.data);
         //****************************************************************
 
         self.process_instruction(
