@@ -149,6 +149,7 @@ fn execute_batches(
     dmslot_number: Option<u64>,
 ) -> Result<()> {
     inc_new_counter_debug!("bank-par_execute_entries-count", batches.len());
+
     let results: Vec<Result<()>> = PAR_THREAD_POOL.with(|thread_pool| {
         thread_pool.borrow().install(|| {
             batches
@@ -163,6 +164,10 @@ fn execute_batches(
                 .collect()
         })
     });
+
+    if deepmind_enabled() {
+        println!("DMLOG BATCH_END");
+    }
 
     first_err(&results)
 }
@@ -744,7 +749,7 @@ pub fn confirm_slot(
             println!("DMLOG SLOT_FAILED {} {:#?}", slot, process_result);
         } else {
             if slot_full {
-                println!("DMLOG SLOT_END {} {} {} {}", slot, progress.last_entry, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
+                println!("DMLOG SLOT_END {} {} {} {}", slot, entries.last().unwrap().hash, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
             }
         }
     }
