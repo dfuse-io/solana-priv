@@ -208,9 +208,7 @@ fn process_entries_with_callback(
             tick_hashes.push(entry.hash);
             let upper_tick_height = bank.tick_height() + tick_hashes.len() as u64;
             if bank.is_block_boundary(upper_tick_height) {
-                if deepmind_enabled() {
-                    println!("DMLOG SLOT_BOUND {} {} {}", upper_tick_height, bank.ticks_per_slot(), entry.hash);
-                }
+
                 // If it's a tick that will cause a new blockhash to be created,
                 // execute the group and register the tick
                 execute_batches(
@@ -221,11 +219,17 @@ fn process_entries_with_callback(
                     replay_vote_sender,
                     dmslot_number,
                 )?;
+
                 batches.clear();
+
                 for hash in &tick_hashes {
                     bank.register_tick(hash);
                 }
                 tick_hashes.clear();
+
+                if deepmind_enabled() {
+                    println!("DMLOG SLOT_BOUND {} {}", (upper_tick_height / bank.ticks_per_slot()) - 1, entry.hash);
+                }
             }
             continue;
         }
@@ -688,43 +692,22 @@ pub fn confirm_slot(
     //****************************************************************
     // DMLOG
     //****************************************************************
-    let mut dmlog_last_hash = Hash::default();
-    if let Some(last_entry) = entries.last() {
-        dmlog_last_hash = last_entry.hash;
-    }
-    let roots = bank.status_cache_ancestors();
-    let min_max = bank
-        .src
-        .status_cache
-        .read()
-        .map(|value| {
-            let roots = value.roots();
-
-            (
-                roots.iter().min().cloned().unwrap_or(0),
-                roots.iter().max().cloned().unwrap_or(0),
-            )
-        })
-        .unwrap_or((0, 0));
-
-    if deepmind_enabled() {
+    if deepmind_enabled() && num_entries != 0 {
         println!(
-            "DMLOG SLOT_PROCESS {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
-            if slot_full { "full" } else { "partial" },
+            "DMLOG SLOT_WORK {} {} {} {} {} {} {} {} {} {} {} {} {}",
+            bank.parent_slot(),
             slot,
-            dmlog_last_hash,       // current SLOT hash
-            progress.last_entry,   // previous SLOT hash, not blockhash
+            if slot_full { "full" } else { "partial" },
             bank.last_blockhash(), // previous BLOCK hash, not slot hash (in case we skipped one)
-            bank.tick_height(),
             bank.block_height(), // total blocks created until this point (OFF BY ONE CHECK HERE)
-            roots[0],
-            roots[roots.len() - 1],
-            roots.len(),
-            min_max.0,
-            min_max.1,
             num_entries,
             num_txs,
             num_shreds,
+            progress.num_entries,
+            progress.num_txs,
+            progress.num_shreds,
+            progress.last_entry,
+            progress.tick_hash_count,
         );
     }
     //****************************************************************
@@ -761,7 +744,7 @@ pub fn confirm_slot(
             println!("DMLOG SLOT_FAILED {} {:#?}", slot, process_result);
         } else {
             if slot_full {
-                println!("DMLOG SLOT_END {} {} {}", slot, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
+                println!("DMLOG SLOT_END {} {} {} {}", slot, progress.last_entry, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
             }
         }
     }

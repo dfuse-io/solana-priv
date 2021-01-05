@@ -27,6 +27,7 @@ export RUST_BACKTRACE=full
     --wal-recovery-mode skip_any_corrupted_record \
     --limit-ledger-size \
     --gossip-host "$GOSSIP_HOST" \
+    --no-poh-speed-test \
     --deepmind \
 #    --no-snapshot-fetch \
 #    --no-port-check \
