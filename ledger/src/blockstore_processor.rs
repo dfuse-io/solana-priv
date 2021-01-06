@@ -165,7 +165,7 @@ fn execute_batches(
         })
     });
 
-    if deepmind_enabled() {
+    if deepmind_enabled() && batches.len() > 0 {
         println!("DMLOG BATCH_END");
     }
 
