@@ -235,7 +235,7 @@ impl<'a> ThisInvokeContext<'a> {
         executors: Rc<RefCell<Executors>>,
         instruction_recorder: Option<InstructionRecorder>,
         feature_set: Arc<FeatureSet>,
-        dmlog_slot_number: u64,
+        dmlog_batch_num: u64,
         dmlog_trx_id: Signature,
         dmlog_last_ordinal_number: u32,
     ) -> Self {
@@ -256,7 +256,7 @@ impl<'a> ThisInvokeContext<'a> {
             instruction_recorder,
             feature_set,
             dmlog_context: DMLogContext{
-                slot_number: dmlog_slot_number,
+                batch_number: dmlog_batch_num,
                 ordinal_number: dmlog_last_ordinal_number,
                 parent_ordinal_number: 0,
                 trx_id: dmlog_trx_id,
@@ -949,7 +949,7 @@ impl MessageProcessor {
         bpf_compute_budget: BpfComputeBudget,
         dmlog_trx_id: Signature,
         dmlog_last_ordinal_number: u32,
-        dmlog_slot_num: u64,
+        dmlog_batch_num: u64,
     ) -> Result<u32, InstructionError> {
         // Fixup the special instructions key if present
         // before the account pre-values are taken care of
@@ -978,7 +978,7 @@ impl MessageProcessor {
             executors,
             instruction_recorder,
             feature_set,
-            dmlog_slot_num,
+            dmlog_batch_num,
             dmlog_trx_id,
             dmlog_last_ordinal_number,
         );
@@ -1030,7 +1030,7 @@ impl MessageProcessor {
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
         dmlog_trx_id: Signature,
-        dmlog_slot_num: u64,
+        dmlog_batch_number: u64,
     ) -> Result<(), TransactionError> {
         let mut dmlog_last_ordinal_number = 0;
         for (instruction_index, instruction) in message.instructions.iter().enumerate() {
@@ -1052,7 +1052,7 @@ impl MessageProcessor {
                 bpf_compute_budget,
                 dmlog_trx_id,
                 dmlog_last_ordinal_number,
-                dmlog_slot_num,
+                dmlog_batch_number,
             )
             .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
         }

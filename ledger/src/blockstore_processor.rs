@@ -47,6 +47,7 @@ use std::{
     time::{Duration, Instant},
 };
 use thiserror::Error;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub type BlockstoreProcessorResult =
     result::Result<(BankForks, LeaderScheduleCache), BlockstoreProcessorError>;
@@ -103,7 +104,7 @@ fn execute_batch(
     bank: &Arc<Bank>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
-    dmslot_number: Option<u64>
+    dmbatch_number: Option<u64>
 ) -> Result<()> {
     let (tx_results, balances, inner_instructions, transaction_logs) =
         batch.bank().load_execute_and_commit_transactions(
@@ -112,7 +113,7 @@ fn execute_batch(
             transaction_status_sender.is_some(),
             transaction_status_sender.is_some(),
             transaction_status_sender.is_some(),
-            dmslot_number,
+            dmbatch_number,
         );
 
     bank_utils::find_and_send_votes(batch.transactions(), &tx_results, replay_vote_sender);
@@ -146,16 +147,20 @@ fn execute_batches(
     entry_callback: Option<&ProcessCallback>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
-    dmslot_number: Option<u64>,
+    _dmslot_number: Option<u64>,
 ) -> Result<()> {
     inc_new_counter_debug!("bank-par_execute_entries-count", batches.len());
 
+
     let results: Vec<Result<()>> = PAR_THREAD_POOL.with(|thread_pool| {
         thread_pool.borrow().install(|| {
+            let i:AtomicU64 = AtomicU64::new(0);
+
             batches
                 .into_par_iter()
                 .map_with(transaction_status_sender, |sender, batch| {
-                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, dmslot_number);
+                    let batch_id = i.fetch_add(1, Ordering::Relaxed);
+                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, Some(batch_id));
                     if let Some(entry_callback) = entry_callback {
                         entry_callback(bank);
                     }

@@ -17,9 +17,17 @@ pub fn deepmind_enabled() -> bool {
     return DEEPMIND_ENABLED.load(Ordering::Relaxed);
 }
 
+
+#[derive(Default,Copy,Clone)]
+pub struct DMTrxContext {
+    pub signature: Signature,
+    pub batch_number: u64,
+
+}
+
 #[derive(Default,Copy,Clone)]
 pub struct DMLogContext {
-    pub slot_number: u64,
+    pub batch_number: u64,
     pub ordinal_number: u32,
     pub parent_ordinal_number: u32,
     pub trx_id: Signature,
@@ -47,7 +55,7 @@ impl DMLogContext {
         if deepmind_enabled() {
             println!(
                 "DMLOG INST_S {} {} {} {} {} {} {}",
-                self.slot_number,
+                self.batch_number,
                 self.trx_id,
                 self.ordinal_number,
                 self.parent_ordinal_number,
@@ -62,7 +70,7 @@ impl DMLogContext {
         if deepmind_enabled() {
             println!(
                 "DMLOG LAMP_CH {} {} {} {} {} {}",
-                self.slot_number,
+                self.batch_number,
                 self.trx_id,
                 self.ordinal_number,
                 pubkey,
@@ -76,7 +84,7 @@ impl DMLogContext {
         if deepmind_enabled() {
             println!(
                 "DMLOG ACCT_CH {} {} {} {} {} {}",
-                self.slot_number,
+                self.batch_number,
                 self.trx_id,
                 self.ordinal_number,
                 pubkey,

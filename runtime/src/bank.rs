@@ -72,21 +72,11 @@ use solana_stake_program::stake_state::{
     self, Delegation, InflationPointCalculationEvent, PointValue,
 };
 use solana_vote_program::vote_instruction::VoteInstruction;
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    convert::{TryFrom, TryInto},
-    fmt, mem,
-    ops::RangeInclusive,
-    path::PathBuf,
-    ptr,
-    rc::Rc,
-    sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
-        LockResult, RwLockWriteGuard, {Arc, RwLock, RwLockReadGuard},
-    },
-    time::Duration,
-};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, convert::{TryFrom, TryInto}, fmt, mem, ops::RangeInclusive, path::PathBuf, ptr, rc::Rc, sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering::Relaxed},
+    LockResult, RwLockWriteGuard, {Arc, RwLock, RwLockReadGuard},
+}, time::Duration};
+
 
 pub const SECONDS_PER_YEAR: f64 = 365.25 * 24.0 * 60.0 * 60.0;
 
@@ -113,6 +103,7 @@ type RentCollectionCycleParams = (
     EpochCount,
     PartitionsPerCycle,
 );
+
 
 type EpochCount = u64;
 
@@ -2761,7 +2752,7 @@ impl Bank {
         max_age: usize,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
-        dmslot_number: Option<u64>
+        dmbatch_number: Option<u64>
     ) -> (
         Vec<TransactionLoadResult>,
         Vec<TransactionExecutionResult>,
@@ -2842,15 +2833,14 @@ impl Bank {
                         None
                     };
 
-
-                    let slot_num = dmslot_number.unwrap_or(0);
+                    let batch_number = dmbatch_number.unwrap_or(0);
 
                     let msg = tx.message();
                     let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
                     let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
                     if deepmind_enabled() {
                         println!("DMLOG TRX_START {} {} {} {} {} {} {}",
-                                 slot_num,
+                                 batch_number,
                                  sigs,
                                  msg.header.num_required_signatures,
                                  msg.header.num_readonly_signed_accounts,
@@ -2871,7 +2861,7 @@ impl Bank {
                         self.feature_set.clone(),
                         bpf_compute_budget,
                         tx.signatures[0],
-                        slot_num
+                        batch_number
                     );
 
                     if enable_log_recording {
@@ -2884,7 +2874,7 @@ impl Bank {
                         //****************************************************************
                         if deepmind_enabled() {
                             for log in log_messages.clone() {
-                                println!("DMLOG TRX_LOG {} {} {}", slot_num, tx.signatures[0], hex::encode(log));
+                                println!("DMLOG TRX_LOG {} {} {}", batch_number, tx.signatures[0], hex::encode(log));
                             }
                         }
                         //****************************************************************
@@ -2918,7 +2908,7 @@ impl Bank {
                             nonce_rollback.clone()
                         };
                     if deepmind_enabled() {
-                        println!("DMLOG TRX_END {} {}", slot_num, tx.signatures[0]);
+                        println!("DMLOG TRX_END {} {}", batch_number, tx.signatures[0]);
                     }
                     (process_result, nonce_rollback)
                 }
@@ -3710,7 +3700,7 @@ impl Bank {
         collect_balances: bool,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
-        dmslot_number: Option<u64>
+        dmbatch_number: Option<u64>
     ) -> (
         TransactionResults,
         TransactionBalancesSet,
@@ -3736,7 +3726,7 @@ impl Bank {
             max_age,
             enable_cpi_recording,
             enable_log_recording,
-            dmslot_number,
+            dmbatch_number,
         );
 
         let results = self.commit_transactions(
