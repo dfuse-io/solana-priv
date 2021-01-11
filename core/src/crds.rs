@@ -36,10 +36,15 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use solana_sdk::timing::timestamp;
 use std::cmp;
-use std::collections::HashMap;
-use std::ops::Index;
+use std::collections::{hash_map, HashMap};
+use std::ops::{Index, IndexMut};
 
 const CRDS_SHARDS_BITS: u32 = 8;
+// Limit number of crds values associated with each unique pubkey. This
+// excludes crds values which by label design are limited per each pubkey.
+// TODO: Find the right value for this once duplicate shreds and corresponding
+// votes are broadcasted over gossip.
+const MAX_CRDS_VALUES_PER_PUBKEY: usize = 512;
 
 #[derive(Clone)]
 pub struct Crds {
@@ -49,6 +54,8 @@ pub struct Crds {
     shards: CrdsShards,
     // Indices of all crds values which are node ContactInfo.
     nodes: IndexSet<usize>,
+    // Indices of all crds values associated with a node.
+    records: HashMap<Pubkey, IndexSet<usize>>,
 }
 
 #[derive(PartialEq, Debug)]
@@ -107,6 +114,7 @@ impl Default for Crds {
             num_inserts: 0,
             shards: CrdsShards::new(CRDS_SHARDS_BITS),
             nodes: IndexSet::default(),
+            records: HashMap::default(),
         }
     }
 }
@@ -141,6 +149,10 @@ impl Crds {
                 if let CrdsData::ContactInfo(_) = new_value.value.data {
                     self.nodes.insert(entry_index);
                 }
+                self.records
+                    .entry(new_value.value.pubkey())
+                    .or_default()
+                    .insert(entry_index);
                 entry.insert(new_value);
                 self.num_inserts += 1;
                 Ok(None)
@@ -150,6 +162,9 @@ impl Crds {
                 self.shards.remove(index, entry.get());
                 self.shards.insert(index, &new_value);
                 self.num_inserts += 1;
+                // As long as the pubkey does not change, self.records
+                // does not need to be updated.
+                debug_assert_eq!(entry.get().value.pubkey(), new_value.value.pubkey());
                 Ok(Some(entry.insert(new_value)))
             }
             _ => {
@@ -237,16 +252,15 @@ impl Crds {
             .map(move |i| self.table.index(i))
     }
 
-    fn update_label_timestamp(&mut self, id: &CrdsValueLabel, now: u64) {
-        if let Some(e) = self.table.get_mut(id) {
-            e.local_timestamp = cmp::max(e.local_timestamp, now);
-        }
-    }
-
     /// Update the timestamp's of all the labels that are associated with Pubkey
     pub fn update_record_timestamp(&mut self, pubkey: &Pubkey, now: u64) {
-        for label in CrdsValue::record_labels(*pubkey) {
-            self.update_label_timestamp(&label, now);
+        if let Some(indices) = self.records.get(pubkey) {
+            for index in indices {
+                let entry = self.table.index_mut(*index);
+                if entry.local_timestamp < now {
+                    entry.local_timestamp = now;
+                }
+            }
         }
     }
 
@@ -258,30 +272,78 @@ impl Crds {
         now: u64,
         timeouts: &HashMap<Pubkey, u64>,
     ) -> Vec<CrdsValueLabel> {
+        #[rustversion::before(1.49.0)]
+        fn select_nth<T: Ord>(xs: &mut Vec<T>, _nth: usize) {
+            xs.sort_unstable();
+        }
+        #[rustversion::since(1.49.0)]
+        fn select_nth<T: Ord>(xs: &mut Vec<T>, nth: usize) {
+            xs.select_nth_unstable(nth);
+        }
         let default_timeout = *timeouts
             .get(&Pubkey::default())
             .expect("must have default timeout");
-        thread_pool.install(|| {
-            self.table
-                .par_iter()
-                .with_min_len(1024)
-                .filter_map(|(k, v)| {
-                    let timeout = timeouts.get(&k.pubkey()).unwrap_or(&default_timeout);
-                    if v.local_timestamp.saturating_add(*timeout) <= now {
-                        Some(k.clone())
-                    } else {
+        // Given an index of all crd values associated with a pubkey,
+        // returns crds labels of old values to be evicted.
+        let evict = |pubkey, index: &IndexSet<usize>| {
+            let timeout = *timeouts.get(pubkey).unwrap_or(&default_timeout);
+            let mut old_labels = Vec::new();
+            // Buffer of crds values to be evicted based on their wallclock.
+            let mut recent_unlimited_labels: Vec<(u64 /*wallclock*/, usize /*index*/)> = index
+                .into_iter()
+                .filter_map(|ix| {
+                    let (label, value) = self.table.get_index(*ix).unwrap();
+                    if value.local_timestamp.saturating_add(timeout) <= now {
+                        old_labels.push(label.clone());
                         None
+                    } else {
+                        match label.value_space() {
+                            Some(_) => None,
+                            None => Some((value.value.wallclock(), *ix)),
+                        }
                     }
                 })
+                .collect();
+            // Number of values to discard from the buffer:
+            let nth = recent_unlimited_labels
+                .len()
+                .saturating_sub(MAX_CRDS_VALUES_PER_PUBKEY);
+            // Partition on wallclock to discard the older ones.
+            if nth > 0 && nth < recent_unlimited_labels.len() {
+                select_nth(&mut recent_unlimited_labels, nth);
+            }
+            old_labels.extend(
+                recent_unlimited_labels
+                    .split_at(nth)
+                    .0
+                    .iter()
+                    .map(|(_ /*wallclock*/, ix)| self.table.get_index(*ix).unwrap().0.clone()),
+            );
+            old_labels
+        };
+        thread_pool.install(|| {
+            self.records
+                .par_iter()
+                .flat_map(|(pubkey, index)| evict(pubkey, index))
                 .collect()
         })
     }
 
     pub fn remove(&mut self, key: &CrdsValueLabel) -> Option<VersionedCrdsValue> {
-        let (index, _, value) = self.table.swap_remove_full(key)?;
+        let (index, _ /*label*/, value) = self.table.swap_remove_full(key)?;
         self.shards.remove(index, &value);
         if let CrdsData::ContactInfo(_) = value.value.data {
             self.nodes.swap_remove(&index);
+        }
+        // Remove the index from records associated with the value's pubkey.
+        let pubkey = value.value.pubkey();
+        let mut records_entry = match self.records.entry(pubkey) {
+            hash_map::Entry::Vacant(_) => panic!("this should not happen!"),
+            hash_map::Entry::Occupied(entry) => entry,
+        };
+        records_entry.get_mut().swap_remove(&index);
+        if records_entry.get().is_empty() {
+            records_entry.remove();
         }
         // If index == self.table.len(), then the removed entry was the last
         // entry in the table, in which case no other keys were modified.
@@ -297,6 +359,10 @@ impl Crds {
                 self.nodes.swap_remove(&size);
                 self.nodes.insert(index);
             }
+            let pubkey = value.value.pubkey();
+            let records = self.records.get_mut(&pubkey).unwrap();
+            records.swap_remove(&size);
+            records.insert(index);
         }
         Some(value)
     }
@@ -305,9 +371,10 @@ impl Crds {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::contact_info::ContactInfo;
+    use crate::{contact_info::ContactInfo, crds_value::NodeInstance};
     use rand::{thread_rng, Rng};
     use rayon::ThreadPoolBuilder;
+    use std::{collections::HashSet, iter::repeat_with};
 
     #[test]
     fn test_insert() {
@@ -353,8 +420,6 @@ mod test {
         )));
         assert_eq!(crds.insert(val.clone(), 0), Ok(None));
 
-        crds.update_label_timestamp(&val.label(), 1);
-        assert_eq!(crds.table[&val.label()].local_timestamp, 1);
         assert_eq!(crds.table[&val.label()].insert_timestamp, 0);
 
         let val2 = CrdsValue::new_unsigned(CrdsData::ContactInfo(ContactInfo::default()));
@@ -423,6 +488,41 @@ mod test {
             vec![val.label()]
         );
     }
+
+    #[test]
+    fn test_find_old_records_unlimited() {
+        let thread_pool = ThreadPoolBuilder::new().build().unwrap();
+        let mut rng = thread_rng();
+        let now = 1_610_034_423_000;
+        let pubkey = Pubkey::new_unique();
+        let mut crds = Crds::default();
+        let mut timeouts = HashMap::new();
+        timeouts.insert(Pubkey::default(), 1);
+        timeouts.insert(pubkey, 180);
+        for _ in 0..1024 {
+            let wallclock = now - rng.gen_range(0, 240);
+            let val = NodeInstance::new(&mut rng, pubkey, wallclock);
+            let val = CrdsData::NodeInstance(val);
+            let val = CrdsValue::new_unsigned(val);
+            assert_eq!(crds.insert(val, now), Ok(None));
+        }
+        let now = now + 1;
+        let labels = crds.find_old_labels(&thread_pool, now, &timeouts);
+        assert_eq!(crds.table.len() - labels.len(), MAX_CRDS_VALUES_PER_PUBKEY);
+        let max_wallclock = labels
+            .iter()
+            .map(|label| crds.lookup(label).unwrap().wallclock())
+            .max()
+            .unwrap();
+        assert!(max_wallclock > now - 180);
+        let labels: HashSet<_> = labels.into_iter().collect();
+        for (label, value) in crds.table.iter() {
+            if !labels.contains(label) {
+                assert!(max_wallclock <= value.value.wallclock());
+            }
+        }
+    }
+
     #[test]
     fn test_remove_default() {
         let thread_pool = ThreadPoolBuilder::new().build().unwrap();
@@ -560,6 +660,45 @@ mod test {
             crds.remove(&key);
             check_crds_nodes(&crds);
         }
+    }
+
+    #[test]
+    fn test_crds_records() {
+        fn check_crds_records(crds: &Crds) {
+            assert_eq!(
+                crds.table.len(),
+                crds.records.values().map(IndexSet::len).sum::<usize>()
+            );
+            for (pubkey, indices) in &crds.records {
+                for index in indices {
+                    let value = crds.table.index(*index);
+                    assert_eq!(*pubkey, value.value.pubkey());
+                }
+            }
+        }
+        let mut rng = thread_rng();
+        let keypairs: Vec<_> = repeat_with(Keypair::new).take(128).collect();
+        let mut crds = Crds::default();
+        for k in 0..4096 {
+            let keypair = &keypairs[rng.gen_range(0, keypairs.len())];
+            let value = VersionedCrdsValue::new_rand(&mut rng, Some(keypair));
+            let _ = crds.insert_versioned(value);
+            if k % 64 == 0 {
+                check_crds_records(&crds);
+            }
+        }
+        assert!(crds.records.len() > 96);
+        assert!(crds.records.len() <= keypairs.len());
+        // Remove values one by one and assert that records stay valid.
+        while !crds.table.is_empty() {
+            let index = rng.gen_range(0, crds.table.len());
+            let key = crds.table.get_index(index).unwrap().0.clone();
+            crds.remove(&key);
+            if crds.table.len() % 64 == 0 {
+                check_crds_records(&crds);
+            }
+        }
+        assert!(crds.records.is_empty());
     }
 
     #[test]
