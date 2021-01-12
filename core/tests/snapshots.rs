@@ -39,13 +39,14 @@ mod tests {
     use fs_extra::dir::CopyOptions;
     use itertools::Itertools;
     use solana_core::{
-        cluster_info::ClusterInfo, contact_info::ContactInfo,
-        snapshot_packager_service::SnapshotPackagerService,
+        cluster_info::ClusterInfo,
+        contact_info::ContactInfo,
+        snapshot_packager_service::{PendingSnapshotPackage, SnapshotPackagerService},
     };
     use solana_runtime::{
         accounts_background_service::SnapshotRequestHandler,
         bank::{Bank, BankSlotDelta},
-        bank_forks::{BankForks, CompressionType, SnapshotConfig},
+        bank_forks::{ArchiveFormat, BankForks, SnapshotConfig},
         genesis_utils::{create_genesis_config, GenesisConfigInfo},
         snapshot_utils,
         snapshot_utils::SnapshotVersion,
@@ -60,8 +61,15 @@ mod tests {
         system_transaction,
     };
     use std::{
-        collections::HashSet, fs, path::PathBuf, sync::atomic::AtomicBool, sync::mpsc::channel,
-        sync::Arc,
+        collections::HashSet,
+        fs,
+        path::PathBuf,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc::channel,
+            Arc,
+        },
+        time::Duration,
     };
     use tempfile::TempDir;
 
@@ -106,7 +114,7 @@ mod tests {
                 snapshot_interval_slots,
                 snapshot_package_output_path: PathBuf::from(snapshot_output_path.path()),
                 snapshot_path: PathBuf::from(snapshot_dir.path()),
-                compression: CompressionType::Bzip2,
+                archive_format: ArchiveFormat::TarBzip2,
                 snapshot_version,
             };
             bank_forks.set_snapshot_config(Some(snapshot_config.clone()));
@@ -146,9 +154,9 @@ mod tests {
             snapshot_utils::get_snapshot_archive_path(
                 snapshot_package_output_path,
                 &(old_last_bank.slot(), old_last_bank.get_accounts_hash()),
-                &CompressionType::Bzip2,
+                &ArchiveFormat::TarBzip2,
             ),
-            CompressionType::Bzip2,
+            ArchiveFormat::TarBzip2,
             old_genesis_config,
             None,
             None,
@@ -226,7 +234,7 @@ mod tests {
             last_bank.src.slot_deltas(&last_bank.src.roots()),
             &snapshot_config.snapshot_package_output_path,
             last_bank.get_snapshot_storages(),
-            CompressionType::Bzip2,
+            ArchiveFormat::TarBzip2,
             snapshot_version,
         )
         .unwrap();
@@ -347,7 +355,7 @@ mod tests {
                 &snapshot_path,
                 &snapshot_package_output_path,
                 snapshot_config.snapshot_version,
-                &snapshot_config.compression,
+                &snapshot_config.archive_format,
             )
             .unwrap();
 
@@ -375,7 +383,7 @@ mod tests {
                 saved_archive_path = Some(snapshot_utils::get_snapshot_archive_path(
                     snapshot_package_output_path,
                     &(slot, accounts_hash),
-                    &CompressionType::Bzip2,
+                    &ArchiveFormat::TarBzip2,
                 ));
             }
         }
@@ -398,10 +406,37 @@ mod tests {
 
         let cluster_info = Arc::new(ClusterInfo::new_with_invalid_keypair(ContactInfo::default()));
 
-        let snapshot_packager_service =
-            SnapshotPackagerService::new(receiver, None, &exit, &cluster_info);
+        let pending_snapshot_package = PendingSnapshotPackage::default();
+        let snapshot_packager_service = SnapshotPackagerService::new(
+            pending_snapshot_package.clone(),
+            None,
+            &exit,
+            &cluster_info,
+        );
 
-        // Close the channel so that the package service will exit after reading all the
+        let _package_receiver = std::thread::Builder::new()
+            .name("package-receiver".to_string())
+            .spawn(move || {
+                while let Ok(mut snapshot_package) = receiver.recv() {
+                    // Only package the latest
+                    while let Ok(new_snapshot_package) = receiver.try_recv() {
+                        snapshot_package = new_snapshot_package;
+                    }
+
+                    *pending_snapshot_package.lock().unwrap() = Some(snapshot_package);
+                }
+
+                // Wait until the package is consumed by SnapshotPackagerService
+                while pending_snapshot_package.lock().unwrap().is_some() {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+
+                // Shutdown SnapshotPackagerService
+                exit.store(true, Ordering::Relaxed);
+            })
+            .unwrap();
+
+        // Close the channel so that the package receiver will exit after reading all the
         // packages off the channel
         drop(sender);
 
@@ -432,7 +467,7 @@ mod tests {
             saved_accounts_dir
                 .path()
                 .join(accounts_dir.path().file_name().unwrap()),
-            CompressionType::Bzip2,
+            ArchiveFormat::TarBzip2,
         );
     }
 
