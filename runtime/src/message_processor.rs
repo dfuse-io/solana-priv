@@ -25,6 +25,7 @@ use solana_sdk::{
     transaction::TransactionError,
 };
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
+use solana_sdk::deepmind::DMBatchContext;
 
 pub struct Executors {
     pub executors: HashMap<Pubkey, Arc<dyn Executor>>,
@@ -219,7 +220,7 @@ pub struct ThisInvokeContext<'a> {
     executors: Rc<RefCell<Executors>>,
     instruction_recorder: Option<InstructionRecorder>,
     feature_set: Arc<FeatureSet>,
-    dmlog_context: DMLogContext,
+    dmbatch_context: Option<&'a mut DMBatchContext>,
 }
 
 impl<'a> ThisInvokeContext<'a> {
@@ -238,6 +239,7 @@ impl<'a> ThisInvokeContext<'a> {
         dmlog_batch_num: u64,
         dmlog_trx_id: Signature,
         dmlog_last_ordinal_number: u32,
+        dmbatch_context: Option<&'a mut DMBatchContext>,
     ) -> Self {
         let mut program_ids = Vec::with_capacity(bpf_compute_budget.max_invoke_depth);
         program_ids.push(*program_id);
@@ -255,12 +257,7 @@ impl<'a> ThisInvokeContext<'a> {
             executors,
             instruction_recorder,
             feature_set,
-            dmlog_context: DMLogContext{
-                batch_number: dmlog_batch_num,
-                ordinal_number: dmlog_last_ordinal_number,
-                parent_ordinal_number: 0,
-                trx_id: dmlog_trx_id,
-            },
+            dmbatch_context: dmbatch_context,
         }
     }
 }
@@ -380,7 +377,7 @@ impl Logger for ThisLogger {
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct MessageProcessor {
+pub struct MessageProcessor<'a> {
     #[serde(skip)]
     programs: Vec<(Pubkey, ProcessInstructionWithContext)>,
     #[serde(skip)]
@@ -900,9 +897,7 @@ impl MessageProcessor {
         instruction_index: usize,
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
-        dmlog_trx_id: Signature,
-        dmlog_last_ordinal_number: u32,
-        dmlog_batch_num: u64,
+        dmbatch_context: Option<&mut DMBatchContext>,
     ) -> Result<u32, InstructionError> {
         // Fixup the special instructions key if present
         // before the account pre-values are taken care of
@@ -934,16 +929,24 @@ impl MessageProcessor {
             dmlog_batch_num,
             dmlog_trx_id,
             dmlog_last_ordinal_number,
+            dmbatch_context,
         );
+
+
         let keyed_accounts =
             Self::create_keyed_accounts(message, instruction, executable_accounts, accounts)?;
 
         //****************************************************************
         // DMLOG: This is the call entry point for top level instructions
         //****************************************************************
-        let dmlog_ctx = invoke_context.get_dmlog_mut();
-        dmlog_ctx.inc_ordinal_number();
-        dmlog_ctx.print_instruction_start(*program_id, &keyed_accounts, &instruction.data);
+        if let Some(ctx) = dmbatch_context {
+            ctx.inc_ordinal_number();
+            ctx.start_instruction(*program_id, &keyed_accounts, &instruction.data);
+        }
+
+        // let dmlog_ctx = invoke_context.get_dmlog_mut();
+        // dmlog_ctx.inc_ordinal_number();
+        // dmlog_ctx.print_instruction_start(*program_id, &keyed_accounts, &instruction.data);
         //****************************************************************
 
         self.process_instruction(
@@ -982,8 +985,7 @@ impl MessageProcessor {
         instruction_recorders: Option<&[InstructionRecorder]>,
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
-        dmlog_trx_id: Signature,
-        dmlog_batch_number: u64,
+        dmbatch_context: Option<&mut DMBatchContext>,
     ) -> Result<(), TransactionError> {
         let mut dmlog_last_ordinal_number = 0;
         for (instruction_index, instruction) in message.instructions.iter().enumerate() {
@@ -1003,9 +1005,7 @@ impl MessageProcessor {
                 instruction_index,
                 feature_set.clone(),
                 bpf_compute_budget,
-                dmlog_trx_id,
-                dmlog_last_ordinal_number,
-                dmlog_batch_number,
+                dmbatch_context,
             )
             .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
         }
@@ -1625,8 +1625,7 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
-            Signature::default(),
-            0
+            None,
         );
         assert_eq!(result, Ok(()));
         assert_eq!(accounts[0].borrow().lamports, 100);
@@ -1652,8 +1651,7 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
-            Signature::default(),
-            0
+            None,
         );
         assert_eq!(
             result,
@@ -1683,8 +1681,7 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
-            Signature::default(),
-            0
+            None,
         );
         assert_eq!(
             result,
@@ -1798,8 +1795,7 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
-            Signature::default(),
-            0
+            None,
         );
         assert_eq!(
             result,
@@ -1829,8 +1825,7 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
-            Signature::default(),
-            0
+            None,
         );
         assert_eq!(result, Ok(()));
 
@@ -1857,8 +1852,7 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
-            Signature::default(),
-            0
+            None,
 
         );
         assert_eq!(result, Ok(()));

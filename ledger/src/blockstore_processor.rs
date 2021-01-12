@@ -48,6 +48,7 @@ use std::{
 };
 use thiserror::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
+use solana_sdk::deepmind::DMBatchContext;
 
 pub type BlockstoreProcessorResult =
     result::Result<(BankForks, LeaderScheduleCache), BlockstoreProcessorError>;
@@ -104,7 +105,7 @@ fn execute_batch(
     bank: &Arc<Bank>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
-    dmbatch_number: Option<u64>
+    dmbatch_context: Option<&mut DMBatchContext>
 ) -> Result<()> {
     let (tx_results, balances, inner_instructions, transaction_logs) =
         batch.bank().load_execute_and_commit_transactions(
@@ -113,7 +114,7 @@ fn execute_batch(
             transaction_status_sender.is_some(),
             transaction_status_sender.is_some(),
             transaction_status_sender.is_some(),
-            dmbatch_number,
+            dmbatch_context,
         );
 
     bank_utils::find_and_send_votes(batch.transactions(), &tx_results, replay_vote_sender);
@@ -160,7 +161,11 @@ fn execute_batches(
                 .into_par_iter()
                 .map_with(transaction_status_sender, |sender, batch| {
                     let batch_id = i.fetch_add(1, Ordering::Relaxed);
-                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, Some(batch_id));
+                    let mut dmbatch_context = DMBatchContext {
+                        batch_number: batch_id,
+                        trxs: Vec::new(),
+                    };
+                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, Some(&mut dmbatch_context));
                     if let Some(entry_callback) = entry_callback {
                         entry_callback(bank);
                     }
@@ -2986,7 +2991,7 @@ pub mod tests {
             false,
             false,
             false,
-            None
+            None,
         );
         let (err, signature) = get_first_error(&batch, fee_collection_results).unwrap();
         // First error found should be for the 2nd transaction, due to iteration_order

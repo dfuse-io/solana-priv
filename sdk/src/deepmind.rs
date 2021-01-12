@@ -5,6 +5,8 @@ use solana_sdk::{
 };
 use hex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use solana_program::hash::Hash;
+use num_traits::ToPrimitive;
 
 pub static DEEPMIND_ENABLED: AtomicBool = AtomicBool::new(false);
 pub fn enable_deepmind() {
@@ -18,12 +20,76 @@ pub fn deepmind_enabled() -> bool {
 }
 
 
-#[derive(Default,Copy,Clone)]
-pub struct DMTrxContext {
-    pub signature: Signature,
-    pub batch_number: u64,
-
+pub struct DMInstruction<'a> {
+    pub data: &'a [u8]
 }
+
+#[derive(Default)]
+pub struct DMTransaction<'a> {
+    pub sig: String,
+    pub num_required_signatures: u8,
+    pub num_readonly_signed_accounts: u8,
+    pub num_readonly_unsigned_accounts: u8,
+    pub account_keys: String,
+    pub recent_blockhash: Hash,
+
+    pub current_ordinal_number: u32,
+    pub instructions: Vec<DMInstruction<'a>>,
+}
+
+impl<'a> DMTransaction<'a> {
+    pub fn inc_ordinal_number(&mut self) {
+        self.current_ordinal_number += 1;
+    }
+
+    pub fn start_instruction(&mut self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
+        self.instructions.push(DMInstruction{
+            data: instruction_data,
+        })
+    }
+}
+
+#[derive(Default)]
+pub struct DMBatchContext<'a> {
+    pub batch_number: u64,
+    pub trxs: Vec<DMTransaction<'a>>,
+}
+
+impl DMBatchContext {
+    pub fn start_trx(&mut self, sig: String, num_required_signatures: u8,num_readonly_signed_accounts: u8,num_readonly_unsigned_accounts: u8,account_keys: String,recent_blockhash: Hash) {
+        let mut ordinal_number = 1;
+        if let Some(i) = self.trxs.len().to_u32() {
+            ordinal_number = i
+        }
+
+        self.trxs.push(DMTransaction{
+            sig,
+            num_required_signatures,
+            num_readonly_signed_accounts,
+            num_readonly_unsigned_accounts,
+            account_keys,
+            recent_blockhash,
+            current_ordinal_number: ordinal_number,
+            instructions: Vec::new(),
+        })
+    }
+
+    pub fn inc_ordinal_number(&mut self) {
+        if let Some(transaction) = self.trxs.last_mut() {
+            transaction.inc_ordinal_number()
+        }
+        // Do we panic here? this should never happen?
+    }
+
+    pub fn start_instruction(&mut self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
+        if let Some(transaction) = self.trxs.last_mut() {
+            transaction.start_instruction(program_id, keyed_accounts, instruction_data)
+        }
+        // Do we panic here? this should never happen?
+    }
+}
+
+
 
 #[derive(Default,Copy,Clone)]
 pub struct DMLogContext {

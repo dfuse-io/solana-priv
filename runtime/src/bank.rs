@@ -283,6 +283,7 @@ pub struct BankRc {
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
 use solana_frozen_abi::abi_example::AbiExample;
+use solana_sdk::deepmind::DMBatchContext;
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
 impl AbiExample for BankRc {
@@ -2772,7 +2773,7 @@ impl Bank {
         max_age: usize,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
-        dmbatch_number: Option<u64>
+        dmbatch_context: Option<&mut DMBatchContext>,
     ) -> (
         Vec<TransactionLoadResult>,
         Vec<TransactionExecutionResult>,
@@ -2858,17 +2859,23 @@ impl Bank {
                     let msg = tx.message();
                     let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
                     let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
-                    if deepmind_enabled() {
-                        println!("DMLOG TRX_START {} {} {} {} {} {} {}",
-                                 batch_number,
-                                 sigs,
-                                 msg.header.num_required_signatures,
-                                 msg.header.num_readonly_signed_accounts,
-                                 msg.header.num_readonly_unsigned_accounts,
-                                 account_keys,
-                                 msg.recent_blockhash,
-                        );
+
+
+
+                    if let Some(ctx) = dmbatch_context {
+                        ctx.start_trx(sigs, msg.header.num_required_signatures, msg.header.num_readonly_signed_accounts, msg.header.num_readonly_unsigned_accounts, account_keys, msg.recent_blockhash);
+                        // println!("DMLOG TRX_START {} {} {} {} {} {} {}",
+                        //          batch_number,
+                        //          sigs,
+                        //          msg.header.num_required_signatures,
+                        //          msg.header.num_readonly_signed_accounts,
+                        //          msg.header.num_readonly_unsigned_accounts,
+                        //          account_keys,
+                        //          msg.recent_blockhash,
+                        // );
+
                     }
+
                     let process_result = self.message_processor.process_message(
                         tx.message(),
                         &loader_refcells,
@@ -2880,8 +2887,7 @@ impl Bank {
                         instruction_recorders.as_deref(),
                         self.feature_set.clone(),
                         bpf_compute_budget,
-                        tx.signatures[0],
-                        batch_number
+                        dmbatch_context
                     );
 
                     if enable_log_recording {
@@ -3720,7 +3726,7 @@ impl Bank {
         collect_balances: bool,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
-        dmbatch_number: Option<u64>
+        dmbatch_context: Option<&mut DMBatchContext>,
     ) -> (
         TransactionResults,
         TransactionBalancesSet,
@@ -3746,7 +3752,7 @@ impl Bank {
             max_age,
             enable_cpi_recording,
             enable_log_recording,
-            dmbatch_number,
+            dmbatch_context,
         );
 
         let results = self.commit_transactions(
