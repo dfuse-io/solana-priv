@@ -10,7 +10,7 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 use std::{cell::RefCell, fmt::Debug, rc::Rc, sync::Arc};
-use crate::deepmind::DMLogContext;
+use crate::deepmind::{DMLogContext, DMBatchContext};
 
 // Prototype of a native loader entry point
 ///
@@ -43,7 +43,6 @@ pub trait InvokeContext {
         message: &Message,
         instruction: &CompiledInstruction,
         accounts: &[Rc<RefCell<Account>>],
-        dmlog_track: bool,
     ) -> Result<(), InstructionError>;
     /// Get the program ID of the currently executing program
     fn get_caller(&self) -> Result<&Pubkey, InstructionError>;
@@ -67,9 +66,7 @@ pub trait InvokeContext {
     /// Get an account from a pre-account
     fn get_account(&self, pubkey: &Pubkey) -> Option<RefCell<Account>>;
 
-    // DMLOG context
-    fn get_dmlog_mut(&mut self) -> &mut DMLogContext;
-    fn get_dmlog(&self) -> DMLogContext;
+    fn get_dmlog_ctx(&mut self) -> Option<&mut DMBatchContext>;
 }
 
 #[derive(Clone, Copy, Debug, AbiExample)]
@@ -334,7 +331,6 @@ impl InvokeContext for MockInvokeContext {
         _message: &Message,
         _instruction: &CompiledInstruction,
         _accounts: &[Rc<RefCell<Account>>],
-        _dmlog_track: bool,
     ) -> Result<(), InstructionError> {
         Ok(())
     }
@@ -365,10 +361,5 @@ impl InvokeContext for MockInvokeContext {
         None
     }
 
-    fn get_dmlog_mut(&mut self) -> &mut DMLogContext {
-        &mut self.dmlog_context
-    }
-    fn get_dmlog(&self) -> DMLogContext {
-        self.dmlog_context
-    }
+    fn get_dmlog_ctx(&mut self) -> Option<&mut DMBatchContext> { None }
 }

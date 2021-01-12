@@ -68,7 +68,6 @@ use solana_sdk::{
     sysvar::{self},
     timing::years_as_slots,
     transaction::{self, Result, Transaction, TransactionError},
-    deepmind::deepmind_enabled,
 };
 use solana_stake_program::stake_state::{
     self, Delegation, InflationPointCalculationEvent, PointValue,
@@ -2854,13 +2853,9 @@ impl Bank {
                         None
                     };
 
-                    let batch_number = dmbatch_number.unwrap_or(0);
-
                     let msg = tx.message();
                     let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
                     let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
-
-
 
                     if let Some(ctx) = dmbatch_context {
                         ctx.start_trx(sigs, msg.header.num_required_signatures, msg.header.num_readonly_signed_accounts, msg.header.num_readonly_unsigned_accounts, account_keys, msg.recent_blockhash);
@@ -2898,9 +2893,9 @@ impl Bank {
                         //****************************************************************
                         // DMLOG
                         //****************************************************************
-                        if deepmind_enabled() {
+                        if let Some(ctx) = dmbatch_context {
                             for log in log_messages.clone() {
-                                println!("DMLOG TRX_LOG {} {} {}", batch_number, tx.signatures[0], hex::encode(log));
+                                ctx.add_log(hex::encode(log));
                             }
                         }
                         //****************************************************************
@@ -2933,9 +2928,10 @@ impl Bank {
                         } else {
                             nonce_rollback.clone()
                         };
-                    if deepmind_enabled() {
-                        println!("DMLOG TRX_END {} {}", batch_number, tx.signatures[0]);
-                    }
+
+                    // if deepmind_enabled() {
+                    //     println!("DMLOG TRX_END {} {}", batch_number, tx.signatures[0]);
+                    // }
                     (process_result, nonce_rollback)
                 }
             })

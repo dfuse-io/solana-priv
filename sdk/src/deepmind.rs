@@ -19,13 +19,34 @@ pub fn deepmind_enabled() -> bool {
     return DEEPMIND_ENABLED.load(Ordering::Relaxed);
 }
 
-
-pub struct DMInstruction<'a> {
-    pub data: &'a [u8]
+pub struct DMAccountChange {
+    pub pubkey: Pubkey,
+    pub pre: Vec<u8>,
+    pub post:Vec<u8>,
 }
 
+pub struct DMInstruction {
+    pub data: Vec<u8>,
+    pub program_id: Pubkey,
+    pub accounts: Vec<String>,
+    pub account_changes: Vec<DMAccountChange>
+}
+
+impl DMInstruction {
+    pub fn add_account_change(&mut self,  pubkey: Pubkey, pre: &[u8], post: &[u8]) {
+        let mut account = DMAccountChange{
+            pubkey,
+            pre: Vec::with_capacity(pre.len()),
+            post: Vec::with_capacity(post.len())
+        };
+        account.pre.copy_from_slice(pre);
+        account.post.copy_from_slice(post);
+        self.account_changes.push(account);
+    }
+
+}
 #[derive(Default)]
-pub struct DMTransaction<'a> {
+pub struct DMTransaction {
     pub sig: String,
     pub num_required_signatures: u8,
     pub num_readonly_signed_accounts: u8,
@@ -34,28 +55,39 @@ pub struct DMTransaction<'a> {
     pub recent_blockhash: Hash,
 
     pub current_ordinal_number: u32,
-    pub instructions: Vec<DMInstruction<'a>>,
+    pub instructions: Vec<DMInstruction>,
+    pub logs: Vec<String>,
 }
 
-impl<'a> DMTransaction<'a> {
+impl DMTransaction {
     pub fn inc_ordinal_number(&mut self) {
         self.current_ordinal_number += 1;
     }
 
     pub fn start_instruction(&mut self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
-        self.instructions.push(DMInstruction{
-            data: instruction_data,
-        })
+        let accounts: Vec<String> = keyed_accounts.into_iter().map(|i| format!("{}:{}{}", i.unsigned_key(), if i.is_signer() { 1 }  else { 0 }, if i.is_writable() { 1 }  else { 0 })).collect();
+        let mut inst = DMInstruction{
+            accounts,
+            program_id,
+            data: Vec::with_capacity(instruction_data.len()),
+            account_changes: Vec::new(),
+        };
+        inst.data.copy_from_slice(instruction_data);
+        self.instructions.push(inst);
+    }
+
+    pub fn add_log(&mut self, log: String) {
+       self.logs.push(log)
     }
 }
 
 #[derive(Default)]
-pub struct DMBatchContext<'a> {
+pub struct DMBatchContext {
     pub batch_number: u64,
-    pub trxs: Vec<DMTransaction<'a>>,
+    pub trxs: Vec<DMTransaction>,
 }
 
-impl DMBatchContext {
+impl<'a> DMBatchContext {
     pub fn start_trx(&mut self, sig: String, num_required_signatures: u8,num_readonly_signed_accounts: u8,num_readonly_unsigned_accounts: u8,account_keys: String,recent_blockhash: Hash) {
         let mut ordinal_number = 1;
         if let Some(i) = self.trxs.len().to_u32() {
@@ -71,14 +103,8 @@ impl DMBatchContext {
             recent_blockhash,
             current_ordinal_number: ordinal_number,
             instructions: Vec::new(),
+            logs: Vec::new(),
         })
-    }
-
-    pub fn inc_ordinal_number(&mut self) {
-        if let Some(transaction) = self.trxs.last_mut() {
-            transaction.inc_ordinal_number()
-        }
-        // Do we panic here? this should never happen?
     }
 
     pub fn start_instruction(&mut self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
@@ -86,6 +112,20 @@ impl DMBatchContext {
             transaction.start_instruction(program_id, keyed_accounts, instruction_data)
         }
         // Do we panic here? this should never happen?
+    }
+
+    pub fn account_change(&mut self, pubkey: Pubkey, pre: &[u8], post: &[u8]) {
+        if let Some(transaction) = self.trxs.last_mut() {
+            if let Some(instruction) = transaction.instructions.last_mut() {
+                instruction.add_account_change(pubkey, pre, post)
+            }
+        }
+    }
+
+    pub fn add_log(&mut self, log: String) {
+        if let Some(transaction) = self.trxs.last_mut() {
+            transaction.add_log(log);
+        }
     }
 }
 
