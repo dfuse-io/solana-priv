@@ -2885,7 +2885,7 @@ impl Bank {
                         instruction_recorders.as_deref(),
                         self.feature_set.clone(),
                         bpf_compute_budget,
-                        dmbatch_context
+                        &dmbatch_context
                     );
 
                     if enable_log_recording {

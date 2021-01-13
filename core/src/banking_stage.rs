@@ -49,7 +49,6 @@ use std::{
     time::Duration,
     time::Instant,
 };
-use solana_sdk::deepmind::DMBatchContext;
 
 type PacketsAndOffsets = (Packets, Vec<usize>);
 pub type UnprocessedPackets = Vec<PacketsAndOffsets>;
