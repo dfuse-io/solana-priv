@@ -700,6 +700,11 @@ impl MessageProcessor {
             //     ctx.start_instruction(*program_id, &keyed_accounts, &instruction.data)
             // }
 
+            if let Some(ctx_ref) = &dmbatch_context {
+                let ctx = ctx_ref.deref();
+                ctx.borrow_mut().start_instruction(*program_id, &keyed_accounts, &instruction.data);
+            }
+
             // let dmlog_ctx = invoke_context.get_dmlog_mut();
             // let dmlog_prev_parent_ordinal_number = dmlog_ctx.get_parent_ordinal_number();
             // dmlog_ctx.set_parent_ordinal_number(dmlog_ctx.get_ordinal_number());

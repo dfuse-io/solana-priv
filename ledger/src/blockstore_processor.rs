@@ -143,6 +143,8 @@ fn execute_batch(
     first_err.map(|(result, _)| result).unwrap_or(Ok(()))
 }
 
+static GLOBAL_DEEP_MIND_FILE_NUMBER: AtomicUsize = AtomicUsize::new(0);
+
 fn execute_batches(
     bank: &Arc<Bank>,
     batches: &[TransactionBatch],
@@ -162,15 +164,24 @@ fn execute_batches(
                 .into_par_iter()
                 .map_with(transaction_status_sender, |sender, batch| {
                     let batch_id = i.fetch_add(1, Ordering::Relaxed);
+                    let file_number = GLOBAL_DEEP_MIND_FILE_NUMBER.fetch_add(1, Ordering::SeqCst);
+                    let file_path = format!("/tmp/dmlog-{}-{}", old_count + 1, batch_id);
+                    let fl = File::create(file_path).unwrap();
+                    let raw_fd: RawFd = fl.into_raw_fd();
                     let dmbatch_context = DMBatchContext {
                         batch_number: batch_id,
                         trxs: Vec::new(),
+                        fd: raw_fd,
+                        path: file_path,
                     };
                     let dmbatch_ctx_opt = Some(Rc::new(RefCell::new(dmbatch_context)));
                     let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, dmbatch_ctx_opt);
                     if let Some(entry_callback) = entry_callback {
                         entry_callback(bank);
                     }
+
+                    dmbatch_context.flush();
+
                     result
                 })
                 .collect()

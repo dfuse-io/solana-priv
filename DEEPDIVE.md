@@ -3,18 +3,18 @@
 - The function `process_instruction` is called to run the top level instruction
 - When a top level instruction run a sub-instruction that will call `process_cross_program_instruction` ->`runtime/src/message_processor.rs:687`
 
-* Scenario: Instruction A and sub-instruction B both change the same account (A before and after B's execution) 
+* Scenario: Instruction A and sub-instruction B both change the same account (A before and after B's execution)
 -> Transaction A `execute_instruction`
     -> Instruction A `fn process_instruction()`
         -> `ACC_CHANGE INST_A PUB_KEY 0 -> 1`
         ->  Instruction B `process_cross_program_instruction`
-            * `verify_and_update`       Will check that the partial execution of Instruction A 
+            * `verify_and_update`       Will check that the partial execution of Instruction A
                                         modified the correct accounts & update them. A this point we would print out
                                         the "partial" account change of Instruction A.
             * `fn process_instruction()`     Will execute Instruction B
             -> `ACC_CHANGE INST_B PUB_KEY 1 -> 2`
-            * `verify_and_update`       Will check that the full execution of Instruction B 
-                                        modified the correct accounts & update them. At this point 
+            * `verify_and_update`       Will check that the full execution of Instruction B
+                                        modified the correct accounts & update them. At this point
                                         we would print out ACCOUNT_CHANGES for instruction B
         ACC_CHANGE PUB_KEY 2 -> 3
     * `verify_and_update`       Will check that the full final execution of Instruction A
@@ -146,6 +146,8 @@ ledger/src/blockstore_processor.rs:193     fn process_entries_with_callback()
 ------------------------
 
 blockstore_processor.rs:143   execute_batches runs `execute_batch()` each in its own thread
+    -> WHERE WE CREATE THE DMBatchContext
+
 blockstore_processor.rs:101   execute_batch  runs `load_and_execute_and_commit_transcations()` with the batch
 bank.rs:3706                  `load_execute_and_commit_transactions()` calls `self.load_and_execute_transactions` with the batch
 

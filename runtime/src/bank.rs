@@ -2862,15 +2862,6 @@ impl Bank {
                     if let Some(ctx_ref) = &dmbatch_context {
                         let ctx = ctx_ref.deref();
                         ctx.borrow_mut().start_trx(sigs, msg.header.num_required_signatures, msg.header.num_readonly_signed_accounts, msg.header.num_readonly_unsigned_accounts, account_keys, msg.recent_blockhash);
-                        // println!("DMLOG TRX_START {} {} {} {} {} {} {}",
-                        //          batch_number,
-                        //          sigs,
-                        //          msg.header.num_required_signatures,
-                        //          msg.header.num_readonly_signed_accounts,
-                        //          msg.header.num_readonly_unsigned_accounts,
-                        //          account_keys,
-                        //          msg.recent_blockhash,
-                        // );
                     }
 
 
@@ -2933,7 +2924,13 @@ impl Bank {
                             nonce_rollback.clone()
                         };
 
+                    // DMLOG: replaces `TRX_END` below
+                    if let Some(ctx_ref) = &dmbatch_context {
+                        let ctx = ctx_ref.deref();
+                        ctx.borrow_mut().trx_end();
+                    }
                     // if deepmind_enabled() {
+
                     //     println!("DMLOG TRX_END {} {}", batch_number, tx.signatures[0]);
                     // }
                     (process_result, nonce_rollback)

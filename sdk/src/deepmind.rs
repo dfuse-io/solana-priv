@@ -3,6 +3,9 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Signature,
 };
+use std::fs::File;
+use std::os::unix::io::{FromRawFd, IntoRawFd, RawFd};
+use std::io::Write;
 use hex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use solana_program::hash::Hash;
@@ -47,7 +50,7 @@ impl DMInstruction {
 }
 #[derive(Default)]
 pub struct DMTransaction {
-    pub sig: String,
+    pub sigs: String, // ':'-separated list of signatures
     pub num_required_signatures: u8,
     pub num_readonly_signed_accounts: u8,
     pub num_readonly_unsigned_accounts: u8,
@@ -85,17 +88,32 @@ impl DMTransaction {
 pub struct DMBatchContext {
     pub batch_number: u64,
     pub trxs: Vec<DMTransaction>,
+    pub fd: i32,
+    pub path: String,
 }
 
 impl<'a> DMBatchContext {
-    pub fn start_trx(&mut self, sig: String, num_required_signatures: u8,num_readonly_signed_accounts: u8,num_readonly_unsigned_accounts: u8,account_keys: String,recent_blockhash: Hash) {
+    pub fn start_trx(&mut self, sigs: String, num_required_signatures: u8,num_readonly_signed_accounts: u8,num_readonly_unsigned_accounts: u8,account_keys: String,recent_blockhash: Hash) {
         let mut ordinal_number = 1;
         if let Some(i) = self.trxs.len().to_u32() {
             ordinal_number = i
         }
 
+        let f = unsafe { &mut File::from_raw_fd(self.fd) };
+        let cnt = format!("TRX_START {} {} {} {} {} {}",
+                 sigs,
+                 num_required_signatures,
+                 num_readonly_signed_accounts,
+                 num_readonly_unsigned_accounts,
+                 account_keys,
+                 recent_blockhash,
+        );
+        f.write_all(cnt.as_bytes()); // TODO: any error handling here??
+        // TODO: make sure all those `write_all` calls don't close the file, because the next
+        // write would fail
+
         self.trxs.push(DMTransaction{
-            sig,
+            sigs,
             num_required_signatures,
             num_readonly_signed_accounts,
             num_readonly_unsigned_accounts,
@@ -105,6 +123,12 @@ impl<'a> DMBatchContext {
             instructions: Vec::new(),
             logs: Vec::new(),
         })
+    }
+
+    pub fn flush(&mut self) {
+        let f = unsafe { &mut File::from_raw_fd(self.fd) };
+        drop(f); // TODO: call `sync_all()` to handle errors upon closing, otherwise we'll have issues on the other side!
+        println!("DMLOG BATCH {}", self.path);
     }
 
     pub fn start_instruction(&mut self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
@@ -123,9 +147,29 @@ impl<'a> DMBatchContext {
     }
 
     pub fn add_log(&mut self, log: String) {
+        let f = unsafe { &mut File::from_raw_fd(self.fd) };
+        //println!("DMLOG TRX_LOG {} {} {}", slot_num, tx.signatures[0], hex::encode(log));
+        //
+        // We shouldn't need the `tx.signatures[0]` nor the `slot_num`
+        // now because we'll be processing batches that are complete
+        // by the time they reach us (through the `DMLOG BATCH` file),
+        // and processing them linearly.
+        f.write_all(format!("TRX_LOG {}", log).as_bytes());
+
         if let Some(transaction) = self.trxs.last_mut() {
             transaction.add_log(log);
         }
+    }
+
+    pub fn trx_end(&mut self) {
+        let f = unsafe { &mut File::from_raw_fd(self.fd) };
+        //println!("DMLOG TRX_LOG {} {} {}", slot_num, tx.signatures[0], hex::encode(log));
+        //
+        // We shouldn't need the `tx.signatures[0]` nor the `slot_num`
+        // now because we'll be processing batches that are complete
+        // by the time they reach us (through the `DMLOG BATCH` file),
+        // and processing them linearly.
+        f.write_all("TRX_END".as_bytes());
     }
 }
 
