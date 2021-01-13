@@ -73,7 +73,7 @@ impl PreAccount {
         program_id: &Pubkey,
         rent: &Rent,
         post: &Account,
-        dmbatch_context: &Option<Rc<RefCell<&mut DMBatchContext>>>,
+        dmbatch_context: &Option<Rc<RefCell<DMBatchContext>>>,
     ) -> Result<(), InstructionError> {
         let pre = self.account.borrow();
 
@@ -221,7 +221,7 @@ pub struct ThisInvokeContext<'a> {
     executors: Rc<RefCell<Executors>>,
     instruction_recorder: Option<InstructionRecorder>,
     feature_set: Arc<FeatureSet>,
-    dmbatch_context: Option<Rc<RefCell<&'a mut DMBatchContext>>>,
+    dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>,
 }
 
 impl<'a> ThisInvokeContext<'a> {
@@ -237,7 +237,7 @@ impl<'a> ThisInvokeContext<'a> {
         executors: Rc<RefCell<Executors>>,
         instruction_recorder: Option<InstructionRecorder>,
         feature_set: Arc<FeatureSet>,
-        dmbatch_context: Option<Rc<RefCell<&'a mut DMBatchContext>>>
+        dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>
     ) -> Self {
         let mut program_ids = Vec::with_capacity(bpf_compute_budget.max_invoke_depth);
         program_ids.push(*program_id);
@@ -780,7 +780,7 @@ impl MessageProcessor {
         executable_accounts: &[(Pubkey, RefCell<Account>)],
         accounts: &[Rc<RefCell<Account>>],
         rent: &Rent,
-        dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>,
+        dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>,
     ) -> Result<(), InstructionError> {
         // Verify all executable accounts have zero outstanding refs
         Self::verify_account_references(executable_accounts)?;
@@ -836,7 +836,7 @@ impl MessageProcessor {
         accounts: &[Rc<RefCell<Account>>],
         program_id: &Pubkey,
         rent: &Rent,
-        dmbatch_context: &Option<Rc<RefCell<&mut DMBatchContext>>>,
+        dmbatch_context: &Option<Rc<RefCell<DMBatchContext>>>,
     ) -> Result<(), InstructionError> {
         // Verify the per-account instruction results
         let (mut pre_sum, mut post_sum) = (0_u128, 0_u128);
@@ -898,7 +898,7 @@ impl MessageProcessor {
         instruction_index: usize,
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
-        dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>,
+        dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>,
     ) -> Result<(), InstructionError> {
         // Fixup the special instructions key if present
         // before the account pre-values are taken care of
@@ -914,6 +914,7 @@ impl MessageProcessor {
                 }
             }
         }
+
         let pre_accounts = Self::create_pre_accounts(message, instruction, accounts);
         let program_id = instruction.program_id(&message.account_keys);
         let keyed_accounts =
@@ -922,7 +923,7 @@ impl MessageProcessor {
         //****************************************************************
         // DMLOG: This is the call entry point for top level instructions
         //****************************************************************
-        if let Some(ctx_ref) = &dmbatch_context {
+        if let Some(ctx_ref) = dmbatch_context {
             let ctx = ctx_ref.deref();
             ctx.borrow_mut().start_instruction(*program_id, &keyed_accounts, &instruction.data);
         }
@@ -976,7 +977,7 @@ impl MessageProcessor {
         instruction_recorders: Option<&[InstructionRecorder]>,
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
-        dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>,
+        dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>,
     ) -> Result<(), TransactionError> {
         for (instruction_index, instruction) in message.instructions.iter().enumerate() {
             let instruction_recorder = instruction_recorders

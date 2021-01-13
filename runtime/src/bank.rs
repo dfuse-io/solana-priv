@@ -2773,7 +2773,7 @@ impl Bank {
         max_age: usize,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
-        dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>
+        dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>
     ) -> (
         Vec<TransactionLoadResult>,
         Vec<TransactionExecutionResult>,
@@ -3726,7 +3726,7 @@ impl Bank {
         collect_balances: bool,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
-        dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>
+        dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>
     ) -> (
         TransactionResults,
         TransactionBalancesSet,

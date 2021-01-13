@@ -106,7 +106,7 @@ fn execute_batch(
     bank: &Arc<Bank>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
-    dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>
+    dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>
 ) -> Result<()> {
     let (tx_results, balances, inner_instructions, transaction_logs) =
         batch.bank().load_execute_and_commit_transactions(
@@ -162,11 +162,11 @@ fn execute_batches(
                 .into_par_iter()
                 .map_with(transaction_status_sender, |sender, batch| {
                     let batch_id = i.fetch_add(1, Ordering::Relaxed);
-                    let mut dmbatch_context = DMBatchContext {
+                    let dmbatch_context = DMBatchContext {
                         batch_number: batch_id,
                         trxs: Vec::new(),
                     };
-                    let dmbatch_ctx_opt = Some(Rc::new(RefCell::new(&mut dmbatch_context)));
+                    let dmbatch_ctx_opt = Some(Rc::new(RefCell::new(dmbatch_context)));
                     let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, dmbatch_ctx_opt);
                     if let Some(entry_callback) = entry_callback {
                         entry_callback(bank);
