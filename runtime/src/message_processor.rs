@@ -853,8 +853,8 @@ impl MessageProcessor {
                             .map_err(|_| InstructionError::AccountBorrowOutstanding)?;
 
                     pre_account.verify(&program_id, &rent, &account, dmbatch_context)?;
-                    pre_sum += u128::from(pre_account.lamports());
-                    post_sum += u128::from(account.lamports);
+                        pre_sum += u128::from(pre_account.lamports());
+                        post_sum += u128::from(account.lamports);
 
                         pre_account.update(&account);
 

@@ -139,3 +139,68 @@ ledger/src/blockstore_processor.rs:616:pub fn confirm_slot(
 
 ledger/src/blockstore_processor.rs:175     fn process_entries()   SOLELY USED IN TESTS
 ledger/src/blockstore_processor.rs:193     fn process_entries_with_callback()
+
+    calls into `execute_batches` a bunch of times
+
+
+------------------------
+
+blockstore_processor.rs:143   execute_batches runs `execute_batch()` each in its own thread
+blockstore_processor.rs:101   execute_batch  runs `load_and_execute_and_commit_transcations()` with the batch
+bank.rs:3706                  `load_execute_and_commit_transactions()` calls `self.load_and_execute_transactions` with the batch
+
+bank.rs:2758                  `load_and_execute_transactions` loops through transactions, and executes them, starting a trx, calling for instructions in `message_processor.process_message()`, printing logs and printing the end of a trx.
+
+message_processor.rs        `process_message` executes the instruction,
+
+
+ThisInvokeContext
+  MessageProcessor
+    PreAccount
+
+
+message_processor.rS:976    fn process_message()
+    -> loop les instructions TOP-LEVEL du Message, and call `execute_instruction` on it.
+
+message_processor.rs:886    fn execute_instruction()
+    -> creates the PreAccounts
+    -> creates ThisInvokeContext
+    -> calls `process_instruction()`  GOING DEEPER HERE
+    -> then calls `MessageProcessor.verify()` on this instruction, passing along
+       the INVOKE CONTEXT's `pre_accounts`.
+
+message_processor.rs:498    fn process_instruction
+    -> calls the `process_instruction` from either the BPFLoader, the NativeLoader or some other
+       program's entrypoint.
+
+IN BPF LOADER:
+
+bpf_loader/lib.rs:146    fn process_instruction(.. InvokeContext)
+    -> calls into `process_loader_upgradable_instruction(.. InvokeContext)`
+
+bpf_loader/lib.rs:233    fn process_loader_upgradable_instruction(.. InvokeContext)
+    -> calls into `MessageProcessor::native_invoke()` on line 341
+
+BACK IN MESSAGE PROCESSOR:
+
+message_processor.rs:595    fn native_invoke(InvokeContext, ...)
+    <- called by `bpf_loader/lib.rs:233`
+    -> calls into `MessageProcessor::process_cross_program_instruction()`
+
+message_processor.rs:684    fn process_cross_program_instruction
+    -> calls it InvokeContext::verify_and_update()
+    -> calls it InvokeContext::process_instruction() -> GOES INTO RECURSIVE CALLS
+    -> calls it InvokeContext::verify_and_update()   AGAIN
+
+message_processor.rs:264    fn ThisInvokeContext::verify_and_update()
+    -> calls into MessageProcessor::verify_and_update()
+
+message_processor.rs:836    fn MessageProcessor::verify_and_update()
+    -> calls PreAccount::verify()
+    -> calls PreAccount::update()
+
+message_processor.rs:781    fn MessageProcessor::verify()
+    <- only called by `execute_instruction()`, which is very high-level, for TOP-LEVEL instructions.
+    -> calls `PreAccount::verify()`
+
+message_processor.rs:71     fn PreAccount::verify()
