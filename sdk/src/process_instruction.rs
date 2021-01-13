@@ -10,7 +10,6 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 use std::{cell::RefCell, fmt::Debug, rc::Rc, sync::Arc};
-use crate::deepmind::{DMLogContext, DMBatchContext};
 
 // Prototype of a native loader entry point
 ///
@@ -65,8 +64,6 @@ pub trait InvokeContext {
     fn is_feature_active(&self, feature_id: &Pubkey) -> bool;
     /// Get an account from a pre-account
     fn get_account(&self, pubkey: &Pubkey) -> Option<RefCell<Account>>;
-
-    fn get_dmlog_ctx(&mut self) -> Option<&mut DMBatchContext>;
 }
 
 #[derive(Clone, Copy, Debug, AbiExample)]
@@ -298,7 +295,6 @@ pub struct MockInvokeContext {
     pub compute_meter: MockComputeMeter,
     pub programs: Vec<(Pubkey, ProcessInstructionWithContext)>,
     invoke_depth: usize,
-    dmlog_context: DMLogContext,
 }
 impl Default for MockInvokeContext {
     fn default() -> Self {
@@ -311,7 +307,6 @@ impl Default for MockInvokeContext {
             },
             programs: vec![],
             invoke_depth: 0,
-            dmlog_context: DMLogContext::default(),
         }
     }
 }
@@ -360,6 +355,4 @@ impl InvokeContext for MockInvokeContext {
     fn get_account(&self, _pubkey: &Pubkey) -> Option<RefCell<Account>> {
         None
     }
-
-    fn get_dmlog_ctx(&mut self) -> Option<&mut DMBatchContext> { None }
 }

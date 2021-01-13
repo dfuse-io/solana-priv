@@ -49,6 +49,7 @@ use std::{
 use thiserror::Error;
 use std::sync::atomic::{AtomicU64, Ordering};
 use solana_sdk::deepmind::DMBatchContext;
+use std::rc::Rc;
 
 pub type BlockstoreProcessorResult =
     result::Result<(BankForks, LeaderScheduleCache), BlockstoreProcessorError>;
@@ -105,7 +106,7 @@ fn execute_batch(
     bank: &Arc<Bank>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
-    dmbatch_context: Option<&mut DMBatchContext>
+    dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>
 ) -> Result<()> {
     let (tx_results, balances, inner_instructions, transaction_logs) =
         batch.bank().load_execute_and_commit_transactions(
@@ -165,7 +166,8 @@ fn execute_batches(
                         batch_number: batch_id,
                         trxs: Vec::new(),
                     };
-                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, Some(&mut dmbatch_context));
+                    let dmbatch_ctx_opt = Some(Rc::new(RefCell::new(&mut dmbatch_context)));
+                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, dmbatch_ctx_opt);
                     if let Some(entry_callback) = entry_callback {
                         entry_callback(bank);
                     }

@@ -1,6 +1,62 @@
+# Instruction Execution
+- Top Level instructions get execute by  `execute_instruction` -> `runtime/src/message_processor.rs:888`
+- The function `process_instruction` is called to run the top level instruction
+- When a top level instruction run a sub-instruction that will call `process_cross_program_instruction` ->`runtime/src/message_processor.rs:687`
+
+* Scenario: Instruction A and sub-instruction B both change the same account (A before and after B's execution) 
+-> Transaction A `execute_instruction`
+    -> Instruction A `fn process_instruction()`
+        -> `ACC_CHANGE INST_A PUB_KEY 0 -> 1`
+        ->  Instruction B `process_cross_program_instruction`
+            * `verify_and_update`       Will check that the partial execution of Instruction A 
+                                        modified the correct accounts & update them. A this point we would print out
+                                        the "partial" account change of Instruction A.
+            * `fn process_instruction()`     Will execute Instruction B
+            -> `ACC_CHANGE INST_B PUB_KEY 1 -> 2`
+            * `verify_and_update`       Will check that the full execution of Instruction B 
+                                        modified the correct accounts & update them. At this point 
+                                        we would print out ACCOUNT_CHANGES for instruction B
+        ACC_CHANGE PUB_KEY 2 -> 3
+    * `verify_and_update`       Will check that the full final execution of Instruction A
+                                modified the correct accounts & update them. At this point
+                                we would print ACCOUNT_CHANGES for instruction A's "post B Instruction execution"
+
+In this example we would print out 3 account changes
+1) DMLOG ACCT_CH INST_A PUB_KEY 0 1
+2) DMLOG ACCT_CH INST_B PUB_KEY 1 2
+3) DMLOG ACCT_CH INST_A PUB_KEY 2 3
+
+* Scenario: Instruction A and sub-instruction B both change the same account (A only before B's execution)
+  -> Transaction A `execute_instruction`
+    -> Instruction A `process_instruction`
+        -> `ACC_CHANGE INST_A PUB_KEY 0 -> 1`
+        ->  Instruction B `process_cross_program_instruction`
+            * `verify_and_update` prints an account change
+            * `process_instruction`     Will execute Instruction B
+            -> `ACC_CHANGE INST_B PUB_KEY 1 -> 2`
+            * `verify_and_update` prints an account change
+    * `verify_and_update` does not print an account change
+
+1) DMLOG ACCT_CH INST_A PUB_KEY 0 1
+2) DMLOG ACCT_CH INST_B PUB_KEY 1 2
+
+* Scenario: Instruction A and sub-instruction B both change the same account (A only after B's execution)
+  -> Transaction A `execute_instruction`
+    -> Instruction A `process_instruction`
+        ->  Instruction B `process_cross_program_instruction`
+            * `verify_and_update` does not print anything
+            * `process_instruction`     Will execute Instruction B
+            -> `ACC_CHANGE INST_B PUB_KEY 0 -> 1`
+            * `verify_and_update` prints an account change
+        -> `ACC_CHANGE INST_A PUB_KEY 1 -> 2`
+        * `verify_and_update` prints an account change
+
+1) DMLOG ACCT_CH INST_B PUB_KEY 0 1
+2) DMLOG ACCT_CH INST_A PUB_KEY 1 2
 
 
 
+# Call tree
 > CONSTRUCTOR! This is PRETTY top level
 core/src/validator.rs:221          impl Validator  // pub fn new(
 
@@ -56,11 +112,7 @@ core/src/replay_stage.rs:947:            fn replay_blockstore_into_bank(
 >
 > Is the REPLAY blockstore_into_bank the "live" aspect of it?
 
-
-
-# Call tree leading to `replay_blockstore_into_bank`
-
-
+## Call tree leading to `replay_blockstore_into_bank`
 
 > Schedules a thread that will do:
   > Executes some transactions

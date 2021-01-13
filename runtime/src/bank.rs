@@ -283,6 +283,7 @@ pub struct BankRc {
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
 use solana_frozen_abi::abi_example::AbiExample;
 use solana_sdk::deepmind::DMBatchContext;
+use std::ops::Deref;
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
 impl AbiExample for BankRc {
@@ -2772,7 +2773,7 @@ impl Bank {
         max_age: usize,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
-        dmbatch_context: Option<&mut DMBatchContext>,
+        dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>
     ) -> (
         Vec<TransactionLoadResult>,
         Vec<TransactionExecutionResult>,
@@ -2825,6 +2826,7 @@ impl Bank {
             .bpf_compute_budget
             .unwrap_or_else(|| BpfComputeBudget::new(&self.feature_set));
 
+
         let executed: Vec<TransactionExecutionResult> = loaded_accounts
             .iter_mut()
             .zip(OrderedIterator::new(txs, batch.iteration_order()))
@@ -2857,8 +2859,9 @@ impl Bank {
                     let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
                     let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
 
-                    if let Some(ctx) = dmbatch_context {
-                        ctx.start_trx(sigs, msg.header.num_required_signatures, msg.header.num_readonly_signed_accounts, msg.header.num_readonly_unsigned_accounts, account_keys, msg.recent_blockhash);
+                    if let Some(ctx_ref) = &dmbatch_context {
+                        let ctx = ctx_ref.deref();
+                        ctx.borrow_mut().start_trx(sigs, msg.header.num_required_signatures, msg.header.num_readonly_signed_accounts, msg.header.num_readonly_unsigned_accounts, account_keys, msg.recent_blockhash);
                         // println!("DMLOG TRX_START {} {} {} {} {} {} {}",
                         //          batch_number,
                         //          sigs,
@@ -2868,8 +2871,8 @@ impl Bank {
                         //          account_keys,
                         //          msg.recent_blockhash,
                         // );
-
                     }
+
 
                     let process_result = self.message_processor.process_message(
                         tx.message(),
@@ -2893,9 +2896,10 @@ impl Bank {
                         //****************************************************************
                         // DMLOG
                         //****************************************************************
-                        if let Some(ctx) = dmbatch_context {
+                        if let Some(ctx_ref) = &dmbatch_context {
+                            let ctx = ctx_ref.deref();
                             for log in log_messages.clone() {
-                                ctx.add_log(hex::encode(log));
+                                ctx.borrow_mut().add_log(hex::encode(log));
                             }
                         }
                         //****************************************************************
@@ -3722,7 +3726,7 @@ impl Bank {
         collect_balances: bool,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
-        dmbatch_context: Option<&mut DMBatchContext>,
+        dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>
     ) -> (
         TransactionResults,
         TransactionBalancesSet,

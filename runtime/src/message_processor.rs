@@ -24,6 +24,8 @@ use solana_sdk::{
 };
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 use solana_sdk::deepmind::DMBatchContext;
+use std::borrow::BorrowMut;
+use std::ops::Deref;
 
 pub struct Executors {
     pub executors: HashMap<Pubkey, Arc<dyn Executor>>,
@@ -71,7 +73,7 @@ impl PreAccount {
         program_id: &Pubkey,
         rent: &Rent,
         post: &Account,
-        dmlogbatch_ctx: Option<& mut DMBatchContext>,
+        dmbatch_context: &Option<Rc<RefCell<&mut DMBatchContext>>>,
     ) -> Result<(), InstructionError> {
         let pre = self.account.borrow();
 
@@ -131,9 +133,10 @@ impl PreAccount {
             }
         }
 
-        if let Some(ctx) = dmlogbatch_ctx {
+        if let Some(ctx_ref) = &dmbatch_context {
             if self.is_writable && (pre.data != post.data) {
-                ctx.account_change(self.key, &pre.data, &post.data)
+                let ctx = ctx_ref.deref();
+                ctx.borrow_mut().account_change(self.key, &pre.data, &post.data)
             }
         }
 
@@ -218,7 +221,7 @@ pub struct ThisInvokeContext<'a> {
     executors: Rc<RefCell<Executors>>,
     instruction_recorder: Option<InstructionRecorder>,
     feature_set: Arc<FeatureSet>,
-    dmbatch_context: Option<&'a mut DMBatchContext>,
+    dmbatch_context: Option<Rc<RefCell<&'a mut DMBatchContext>>>,
 }
 
 impl<'a> ThisInvokeContext<'a> {
@@ -234,7 +237,7 @@ impl<'a> ThisInvokeContext<'a> {
         executors: Rc<RefCell<Executors>>,
         instruction_recorder: Option<InstructionRecorder>,
         feature_set: Arc<FeatureSet>,
-        dmbatch_context: Option<&'a mut DMBatchContext>,
+        dmbatch_context: Option<Rc<RefCell<&'a mut DMBatchContext>>>
     ) -> Self {
         let mut program_ids = Vec::with_capacity(bpf_compute_budget.max_invoke_depth);
         program_ids.push(*program_id);
@@ -289,7 +292,7 @@ impl<'a> InvokeContext for ThisInvokeContext<'a> {
                     accounts,
                     key,
                     &self.rent,
-                    self.dmbatch_context,
+                    &self.dmbatch_context,
                 )
             }
             ,
@@ -345,10 +348,6 @@ impl<'a> InvokeContext for ThisInvokeContext<'a> {
                 None
             }
         })
-    }
-
-    fn get_dmlog_ctx(&mut self) -> Option<&mut DMBatchContext> {
-        return self.dmbatch_context
     }
 }
 pub struct ThisLogger {
@@ -781,7 +780,7 @@ impl MessageProcessor {
         executable_accounts: &[(Pubkey, RefCell<Account>)],
         accounts: &[Rc<RefCell<Account>>],
         rent: &Rent,
-        dmlogbatch_ctx: Option<& mut DMBatchContext>,
+        dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>,
     ) -> Result<(), InstructionError> {
         // Verify all executable accounts have zero outstanding refs
         Self::verify_account_references(executable_accounts)?;
@@ -800,7 +799,7 @@ impl MessageProcessor {
                     &program_id,
                     rent,
                     &account,
-                    None,
+                    &dmbatch_context,
                 )?;
                 let pre_lamports = pre_accounts[unique_index].lamports();
                 let post_lamports = account.lamports;
@@ -837,7 +836,7 @@ impl MessageProcessor {
         accounts: &[Rc<RefCell<Account>>],
         program_id: &Pubkey,
         rent: &Rent,
-        dmlogbatch_ctx: Option<& mut DMBatchContext>,
+        dmbatch_context: &Option<Rc<RefCell<&mut DMBatchContext>>>,
     ) -> Result<(), InstructionError> {
         // Verify the per-account instruction results
         let (mut pre_sum, mut post_sum) = (0_u128, 0_u128);
@@ -854,7 +853,7 @@ impl MessageProcessor {
                             .try_borrow_mut()
                             .map_err(|_| InstructionError::AccountBorrowOutstanding)?;
 
-                    pre_account.verify(&program_id, &rent, &account, None)?;
+                    pre_account.verify(&program_id, &rent, &account, dmbatch_context)?;
                     pre_sum += u128::from(pre_account.lamports());
                     post_sum += u128::from(account.lamports);
 
@@ -899,7 +898,7 @@ impl MessageProcessor {
         instruction_index: usize,
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
-        dmbatch_context: Option<&mut DMBatchContext>,
+        dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>,
     ) -> Result<(), InstructionError> {
         // Fixup the special instructions key if present
         // before the account pre-values are taken care of
@@ -923,8 +922,9 @@ impl MessageProcessor {
         //****************************************************************
         // DMLOG: This is the call entry point for top level instructions
         //****************************************************************
-        if let Some(ctx) = dmbatch_context {
-            ctx.start_instruction(*program_id, &keyed_accounts, &instruction.data);
+        if let Some(ctx_ref) = &dmbatch_context {
+            let ctx = ctx_ref.deref();
+            ctx.borrow_mut().start_instruction(*program_id, &keyed_accounts, &instruction.data);
         }
         //****************************************************************
 
@@ -976,7 +976,7 @@ impl MessageProcessor {
         instruction_recorders: Option<&[InstructionRecorder]>,
         feature_set: Arc<FeatureSet>,
         bpf_compute_budget: BpfComputeBudget,
-        dmbatch_context: Option<&mut DMBatchContext>,
+        dmbatch_context: Option<Rc<RefCell<&mut DMBatchContext>>>,
     ) -> Result<(), TransactionError> {
         for (instruction_index, instruction) in message.instructions.iter().enumerate() {
             let instruction_recorder = instruction_recorders
@@ -995,7 +995,7 @@ impl MessageProcessor {
                 instruction_index,
                 feature_set.clone(),
                 bpf_compute_budget,
-                dmbatch_context,
+                dmbatch_context.clone(),
             )
             .map_err(|err| TransactionError::InstructionError(instruction_index as u8, err))?;
         }
@@ -1216,7 +1216,7 @@ mod tests {
             self
         }
         pub fn verify(&self) -> Result<(), InstructionError> {
-            self.pre.verify(&self.program_id, &self.rent, &self.post, None)
+            self.pre.verify(&self.program_id, &self.rent, &self.post, &None)
         }
     }
 
