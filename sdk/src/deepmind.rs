@@ -5,7 +5,6 @@ use solana_sdk::{
 };
 use std::{
     fs::File,
-    io::Write,
     borrow::BorrowMut,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -17,7 +16,6 @@ use crate::pb::codec::{
     MessageHeader,
     Batch,
 };
-use hex;
 use solana_program::hash::Hash;
 use num_traits::ToPrimitive;
 
