@@ -2792,6 +2792,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "protobuf"
+version = "2.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86473d5f16580f10b131a0bf0afb68f8e029d1835d33a00f37281b05694e5312"
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4759,6 +4765,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "pbkdf2",
+ "protobuf",
  "rand 0.7.3",
  "rand_chacha 0.2.2",
  "rustc_version",

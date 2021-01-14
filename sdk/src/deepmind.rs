@@ -8,6 +8,11 @@ use std::{
     borrow::BorrowMut,
     sync::atomic::{AtomicBool, Ordering},
 };
+use solana_sdk::pb::codec::{
+    AccountChange,
+    BalanceChange,
+    Instruction,
+};
 use hex;
 use solana_program::hash::Hash;
 use num_traits::ToPrimitive;
@@ -23,44 +28,37 @@ pub fn deepmind_enabled() -> bool {
     return DEEPMIND_ENABLED.load(Ordering::Relaxed);
 }
 
-pub struct DMAccountChange {
-    pub pubkey: Pubkey,
-    pub pre: Vec<u8>,
-    pub post:Vec<u8>,
-}
-
-pub struct DMLamportChange {
-    pub pubkey: Pubkey,
-    pub pre: u64,
-    pub post:u64,
-}
 pub struct DMInstruction {
     pub ordinal: u32,
     pub parent_ordinal: u32,
     pub data: Vec<u8>,
     pub program_id: Pubkey,
     pub accounts: Vec<String>,
-    pub account_changes: Vec<DMAccountChange>,
-    pub lamport_changes: Vec<DMLamportChange>
+    pub account_changes: Vec<AccountChange>,
+    pub lamport_changes: Vec<BalanceChange>
 }
 
 impl DMInstruction {
     pub fn add_account_change(&mut self,  pubkey: Pubkey, pre: &[u8], post: &[u8]) {
-        let mut account = DMAccountChange{
-            pubkey,
-            pre: Vec::with_capacity(pre.len()),
-            post: Vec::with_capacity(post.len())
+        let post_len = post.len();
+        let mut account = AccountChange{
+            pubkey: format!("{}", pubkey),
+            prev_data: Vec::with_capacity(pre.len()),
+            new_data: Vec::with_capacity(post_len),
+            new_data_length: post_len.to_u64().unwrap_or(0),
+            ..Default::default()
         };
-        account.pre.copy_from_slice(pre);
-        account.post.copy_from_slice(post);
+        account.prev_data.copy_from_slice(pre);
+        account.new_data.copy_from_slice(post);
         self.account_changes.push(account);
     }
 
     pub fn add_lamport_change(&mut self,  pubkey: Pubkey, pre: u64, post: u64) {
-        self.lamport_changes.push(DMLamportChange{
-            pubkey,
-            pre,
-            post
+        self.lamport_changes.push(BalanceChange{
+            pubkey: format!("{}", pubkey),
+            prev_lamports: pre,
+            new_lamports: post,
+            ..Default::default()
         });
     }
 }
@@ -75,7 +73,7 @@ pub struct DMTransaction {
 
     pub current_instruction_index: usize,
 
-    pub instructions: Vec<DMInstruction>,
+    pub instructions: Vec<Instruction>,
     pub logs: Vec<String>,
 }
 
@@ -83,9 +81,9 @@ impl DMTransaction {
     pub fn start_instruction(&mut self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
         let accounts: Vec<String> = keyed_accounts.into_iter().map(|i| format!("{}:{}{}", i.unsigned_key(), if i.is_signer() { 1 }  else { 0 }, if i.is_writable() { 1 }  else { 0 })).collect();
         let inst_ordinal = self.current_instruction_index.to_u32().unwrap_or(0);
-        let mut inst = DMInstruction{
+        let mut inst = Instruction{
+            program_id: format!("{}", program_id),
             accounts,
-            program_id,
             ordinal: (inst_ordinal + 1),
             parent_ordinal: inst_ordinal,
             data: Vec::with_capacity(instruction_data.len()),
@@ -121,17 +119,14 @@ pub struct DMBatchContext {
 impl<'a> DMBatchContext {
     pub fn start_trx(&mut self, sigs: String, num_required_signatures: u8,num_readonly_signed_accounts: u8,num_readonly_unsigned_accounts: u8, account_keys: String, recent_blockhash: Hash) {
 
-        let cnt = format!("TRX_START {} {} {} {} {} {}",
-                 sigs,
-                 num_required_signatures,
-                 num_readonly_signed_accounts,
-                 num_readonly_unsigned_accounts,
-                 account_keys,
-                 recent_blockhash,
-        );
-        if let Err(e) = self.file.write_all(cnt.as_bytes()) {
-            println!("DMLOG FILE_ERROR {}", e);
-        }
+        // let cnt = format!("TRX_START {} {} {} {} {} {}",
+        //          sigs,
+        //          num_required_signatures,
+        //          num_readonly_signed_accounts,
+        //          num_readonly_unsigned_accounts,
+        //          account_keys,
+        //          recent_blockhash,
+        // );
 
         self.trxs.push(DMTransaction{
             sigs,
@@ -147,11 +142,22 @@ impl<'a> DMBatchContext {
     }
 
     pub fn flush(&self) {
+        //
         // loop through transations, and instructions, and logs and whateve, and print it all out
         // in a format ConsoleReader appreciated.
+
+
+
+        // if let Err(e) = self.file.write_all(cnt.as_bytes()) {
+        //     println!("DMLOG FILE_ERROR {}", e);
+        //     return;
+        // }
+
         if let Err(e) = self.file.sync_all() {
             println!("DMLOG FILE_ERROR {}", e);
+            return;
         }
+
         drop(&self.file);
         println!("DMLOG BATCH {}", self.path);
     }
@@ -183,26 +189,8 @@ impl<'a> DMBatchContext {
     }
 
     pub fn add_log(&mut self, log: String) {
-        //println!("DMLOG TRX_LOG {} {} {}", slot_num, tx.signatures[0], hex::encode(log));
-        //
-        // We shouldn't need the `tx.signatures[0]` nor the `slot_num`
-        // now because we'll be processing batches that are complete
-        // by the time they reach us (through the `DMLOG BATCH` file),
-        // and processing them linearly.
-        self.file.write_all(format!("TRX_LOG {}", log).as_bytes());
-
         if let Some(transaction) = self.trxs.last_mut() {
             transaction.add_log(log);
         }
-    }
-
-    pub fn trx_end(&mut self) {
-        //println!("DMLOG TRX_LOG {} {} {}", slot_num, tx.signatures[0], hex::encode(log));
-        //
-        // We shouldn't need the `tx.signatures[0]` nor the `slot_num`
-        // now because we'll be processing batches that are complete
-        // by the time they reach us (through the `DMLOG BATCH` file),
-        // and processing them linearly.
-        self.file.write_all("TRX_END".as_bytes());
     }
 }

@@ -2890,7 +2890,7 @@ impl Bank {
                         if let Some(ctx_ref) = &dmbatch_context {
                             let ctx = ctx_ref.deref();
                             for log in log_messages.clone() {
-                                ctx.borrow_mut().add_log(hex::encode(log));
+                                ctx.borrow_mut().add_log(log);
                             }
                         }
                         //****************************************************************
@@ -2924,15 +2924,6 @@ impl Bank {
                             nonce_rollback.clone()
                         };
 
-                    // DMLOG: replaces `TRX_END` below
-                    if let Some(ctx_ref) = &dmbatch_context {
-                        let ctx = ctx_ref.deref();
-                        ctx.borrow_mut().trx_end();
-                    }
-                    // if deepmind_enabled() {
-
-                    //     println!("DMLOG TRX_END {} {}", batch_number, tx.signatures[0]);
-                    // }
                     (process_result, nonce_rollback)
                 }
             })
