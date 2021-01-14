@@ -16,6 +16,7 @@ use solana_sdk::pb::codec::{
 use hex;
 use solana_program::hash::Hash;
 use num_traits::ToPrimitive;
+use protobuf::RepeatedField;
 
 pub static DEEPMIND_ENABLED: AtomicBool = AtomicBool::new(false);
 pub fn enable_deepmind() {
@@ -79,17 +80,23 @@ pub struct DMTransaction {
 
 impl DMTransaction {
     pub fn start_instruction(&mut self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
-        let accounts: Vec<String> = keyed_accounts.into_iter().map(|i| format!("{}:{}{}", i.unsigned_key(), if i.is_signer() { 1 }  else { 0 }, if i.is_writable() { 1 }  else { 0 })).collect();
+        let accounts: RepeatedField<String> = keyed_accounts.into_iter().map(
+            |i| format!("{}", i.unsigned_key())
+        ).collect();
+
         let inst_ordinal = self.current_instruction_index.to_u32().unwrap_or(0);
         let mut inst = Instruction{
             program_id: format!("{}", program_id),
-            accounts,
+            account_keys: accounts,
+            data: Vec::with_capacity(instruction_data.len()),
             ordinal: (inst_ordinal + 1),
             parent_ordinal: inst_ordinal,
-            data: Vec::with_capacity(instruction_data.len()),
-            account_changes: Vec::new(),
-            lamport_changes: Vec::new(),
+            depth: 0,
+            balance_changes: RepeatedField::default(),
+            account_changes: RepeatedField::default(),
+            ..Default::default()
         };
+
         inst.data.copy_from_slice(instruction_data);
         self.instructions.push(inst);
         self.current_instruction_index = self.instructions.len();
