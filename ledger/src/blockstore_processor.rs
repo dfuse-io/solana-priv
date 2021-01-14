@@ -164,7 +164,7 @@ fn execute_batches(
             batches
                 .into_par_iter()
                 .map_with(transaction_status_sender, |sender, batch| {
-                    let dmbatch_ctx_opt = None<Rc<RefCell<DMBatchContext>>>;
+                    let mut dmbatch_ctx_opt: Option<Rc<RefCell<DMBatchContext>>> = None;
                     if deepmind_enabled() {
                         let batch_id = i.fetch_add(1, Ordering::Relaxed);
                         let file_number = GLOBAL_DEEP_MIND_FILE_NUMBER.fetch_add(1, Ordering::SeqCst);
@@ -184,10 +184,8 @@ fn execute_batches(
                     }
 
                     if let Some(ctx_ref) = &dmbatch_ctx_opt {
-                        // let ctx = ctx_ref.deref();
                         ctx_ref.borrow_mut().flush();
                     }
-
 
                     result
                 })
@@ -196,7 +194,7 @@ fn execute_batches(
     });
 
     if deepmind_enabled() && batches.len() > 0 {
-        println!("DMLOG BATCH_END");
+        println!("DMLOG BATCHES_END");
     }
 
     first_err(&results)

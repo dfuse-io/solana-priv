@@ -2856,8 +2856,8 @@ impl Bank {
                     };
 
                     let msg = tx.message();
-                    let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
-                    let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>().join(":");
+                    let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>();
+                    let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>();
 
                     if let Some(ctx_ref) = &dmbatch_context {
                         let ctx = ctx_ref.deref();

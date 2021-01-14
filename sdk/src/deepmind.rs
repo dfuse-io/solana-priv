@@ -1,3 +1,4 @@
+use protobuf::{RepeatedField, SingularPtrField, Message};
 use solana_sdk::{
     keyed_account::KeyedAccount,
     pubkey::Pubkey,
@@ -8,15 +9,17 @@ use std::{
     borrow::BorrowMut,
     sync::atomic::{AtomicBool, Ordering},
 };
-use solana_sdk::pb::codec::{
+use crate::pb::codec::{
     AccountChange,
     BalanceChange,
     Instruction,
+    Transaction,
+    MessageHeader,
+    Batch,
 };
 use hex;
 use solana_program::hash::Hash;
 use num_traits::ToPrimitive;
-use protobuf::RepeatedField;
 
 pub static DEEPMIND_ENABLED: AtomicBool = AtomicBool::new(false);
 pub fn enable_deepmind() {
@@ -29,17 +32,7 @@ pub fn deepmind_enabled() -> bool {
     return DEEPMIND_ENABLED.load(Ordering::Relaxed);
 }
 
-pub struct DMInstruction {
-    pub ordinal: u32,
-    pub parent_ordinal: u32,
-    pub data: Vec<u8>,
-    pub program_id: Pubkey,
-    pub accounts: Vec<String>,
-    pub account_changes: Vec<AccountChange>,
-    pub lamport_changes: Vec<BalanceChange>
-}
-
-impl DMInstruction {
+impl Instruction {
     pub fn add_account_change(&mut self,  pubkey: Pubkey, pre: &[u8], post: &[u8]) {
         let post_len = post.len();
         let mut account = AccountChange{
@@ -55,7 +48,7 @@ impl DMInstruction {
     }
 
     pub fn add_lamport_change(&mut self,  pubkey: Pubkey, pre: u64, post: u64) {
-        self.lamport_changes.push(BalanceChange{
+        self.balance_changes.push(BalanceChange{
             pubkey: format!("{}", pubkey),
             prev_lamports: pre,
             new_lamports: post,
@@ -65,17 +58,8 @@ impl DMInstruction {
 }
 #[derive(Default)]
 pub struct DMTransaction {
-    pub sigs: String, // ':'-separated list of signatures
-    pub num_required_signatures: u8,
-    pub num_readonly_signed_accounts: u8,
-    pub num_readonly_unsigned_accounts: u8,
-    pub account_keys: String,
-    pub recent_blockhash: Hash,
-
+    pub pb_transaction: Transaction,
     pub current_instruction_index: usize,
-
-    pub instructions: Vec<Instruction>,
-    pub logs: Vec<String>,
 }
 
 impl DMTransaction {
@@ -91,15 +75,13 @@ impl DMTransaction {
             data: Vec::with_capacity(instruction_data.len()),
             ordinal: (inst_ordinal + 1),
             parent_ordinal: inst_ordinal,
-            depth: 0,
             balance_changes: RepeatedField::default(),
             account_changes: RepeatedField::default(),
             ..Default::default()
         };
-
         inst.data.copy_from_slice(instruction_data);
-        self.instructions.push(inst);
-        self.current_instruction_index = self.instructions.len();
+        self.pb_transaction.instructions.push(inst);
+        self.current_instruction_index = self.pb_transaction.instructions.len();
     }
 
     pub fn end_instruction(&mut self) {
@@ -107,11 +89,11 @@ impl DMTransaction {
     }
 
     pub fn add_log(&mut self, log: String) {
-       self.logs.push(log)
+       self.pb_transaction.log_messages.push(log)
     }
 
-    pub fn active_instruction(&mut self) -> &mut DMInstruction {
-        return self.instructions[self.current_instruction_index].borrow_mut();
+    pub fn active_instruction(&mut self) -> &mut Instruction {
+        return self.pb_transaction.instructions[self.current_instruction_index].borrow_mut();
     }
 
 }
@@ -124,44 +106,43 @@ pub struct DMBatchContext {
 }
 
 impl<'a> DMBatchContext {
-    pub fn start_trx(&mut self, sigs: String, num_required_signatures: u8,num_readonly_signed_accounts: u8,num_readonly_unsigned_accounts: u8, account_keys: String, recent_blockhash: Hash) {
-
-        // let cnt = format!("TRX_START {} {} {} {} {} {}",
-        //          sigs,
-        //          num_required_signatures,
-        //          num_readonly_signed_accounts,
-        //          num_readonly_unsigned_accounts,
-        //          account_keys,
-        //          recent_blockhash,
-        // );
-
+    pub fn start_trx(&mut self, sigs: Vec<String>, num_required_signatures: u8,num_readonly_signed_accounts: u8,num_readonly_unsigned_accounts: u8, account_keys: Vec<String>, recent_blockhash: Hash) {
+        let header = MessageHeader{
+            num_required_signatures: num_required_signatures as u32,
+            num_readonly_signed_accounts: num_readonly_signed_accounts as u32,
+            num_readonly_unsigned_accounts: num_readonly_unsigned_accounts as u32,
+            ..Default::default()
+        };
+        let trx = Transaction{
+            id: sigs[0].clone(),
+            additional_signatures: RepeatedField::from_slice(&sigs[1..]),
+            header: SingularPtrField::from_option(Some(header)),
+            account_keys: RepeatedField::from_vec(account_keys),
+            recent_blockhash: format!("{}", recent_blockhash),
+            ..Default::default()
+        };
         self.trxs.push(DMTransaction{
-            sigs,
-            num_required_signatures,
-            num_readonly_signed_accounts,
-            num_readonly_unsigned_accounts,
-            account_keys,
-            recent_blockhash,
+            pb_transaction: trx,
             current_instruction_index: 0,
-            instructions: Vec::new(),
-            logs: Vec::new(),
         })
     }
 
-    pub fn flush(&self) {
-        //
+    pub fn flush(&mut self) {
         // loop through transations, and instructions, and logs and whateve, and print it all out
         // in a format ConsoleReader appreciated.
 
+        let batch = Batch{
+            transactions: RepeatedField::from_vec(self.trxs.drain(..).into_iter().map(|x| x.pb_transaction).collect()),
+            ..Default::default()
+        };
 
-
-        // if let Err(e) = self.file.write_all(cnt.as_bytes()) {
-        //     println!("DMLOG FILE_ERROR {}", e);
-        //     return;
-        // }
+        if let Err(e) = batch.write_to_writer(&mut self.file) {
+            println!("DMLOG ERROR FILE {}", e);
+            return;
+        }
 
         if let Err(e) = self.file.sync_all() {
-            println!("DMLOG FILE_ERROR {}", e);
+            println!("DMLOG ERROR FILE {}", e);
             return;
         }
 
