@@ -47,7 +47,6 @@ use std::{
     time::{Duration, Instant},
     fs::File,
     rc::Rc,
-    os::unix::io::{IntoRawFd, RawFd},
     sync::atomic::{AtomicU64, Ordering, AtomicUsize},
 };
 use thiserror::Error;
@@ -169,11 +168,10 @@ fn execute_batches(
                     let file_number = GLOBAL_DEEP_MIND_FILE_NUMBER.fetch_add(1, Ordering::SeqCst);
                     let file_path = format!("/tmp/dmlog-{}-{}", file_number + 1, batch_id);
                     let fl = File::create(&file_path).unwrap();
-                    let raw_fd: RawFd = fl.into_raw_fd();
                     let dmbatch_context = DMBatchContext {
                         batch_number: batch_id,
                         trxs: Vec::new(),
-                        fd: raw_fd,
+                        file: fl,
                         path: file_path,
                     };
                     let dmbatch_ctx_opt = Some(Rc::new(RefCell::new(dmbatch_context)));

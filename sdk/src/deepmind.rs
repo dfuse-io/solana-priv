@@ -4,7 +4,6 @@ use solana_sdk::{
 };
 use std::{
     fs::File,
-    os::unix::io::{FromRawFd},
     io::Write,
     borrow::BorrowMut,
     sync::atomic::{AtomicBool, Ordering},
@@ -112,18 +111,16 @@ impl DMTransaction {
 
 }
 
-#[derive(Default)]
 pub struct DMBatchContext {
     pub batch_number: u64,
     pub trxs: Vec<DMTransaction>,
-    pub fd: i32,
+    pub file: File,
     pub path: String,
 }
 
 impl<'a> DMBatchContext {
-    pub fn start_trx(&mut self, sigs: String, num_required_signatures: u8,num_readonly_signed_accounts: u8,num_readonly_unsigned_accounts: u8,account_keys: String,recent_blockhash: Hash) {
+    pub fn start_trx(&mut self, sigs: String, num_required_signatures: u8,num_readonly_signed_accounts: u8,num_readonly_unsigned_accounts: u8, account_keys: String, recent_blockhash: Hash) {
 
-        let f = unsafe { &mut File::from_raw_fd(self.fd) };
         let cnt = format!("TRX_START {} {} {} {} {} {}",
                  sigs,
                  num_required_signatures,
@@ -132,9 +129,9 @@ impl<'a> DMBatchContext {
                  account_keys,
                  recent_blockhash,
         );
-        f.write_all(cnt.as_bytes()); // TODO: any error handling here??
-        // TODO: make sure all those `write_all` calls don't close the file, because the next
-        // write would fail
+        if let Err(e) = self.file.write_all(cnt.as_bytes()) {
+            println!("DMLOG FILE_ERROR {}", e);
+        }
 
         self.trxs.push(DMTransaction{
             sigs,
@@ -150,8 +147,12 @@ impl<'a> DMBatchContext {
     }
 
     pub fn flush(&self) {
-        let f = unsafe { &mut File::from_raw_fd(self.fd) };
-        drop(f); // TODO: call `sync_all()` to handle errors upon closing, otherwise we'll have issues on the other side!
+        // loop through transations, and instructions, and logs and whateve, and print it all out
+        // in a format ConsoleReader appreciated.
+        if let Err(e) = self.file.sync_all() {
+            println!("DMLOG FILE_ERROR {}", e);
+        }
+        drop(&self.file);
         println!("DMLOG BATCH {}", self.path);
     }
 
@@ -182,14 +183,13 @@ impl<'a> DMBatchContext {
     }
 
     pub fn add_log(&mut self, log: String) {
-        let f = unsafe { &mut File::from_raw_fd(self.fd) };
         //println!("DMLOG TRX_LOG {} {} {}", slot_num, tx.signatures[0], hex::encode(log));
         //
         // We shouldn't need the `tx.signatures[0]` nor the `slot_num`
         // now because we'll be processing batches that are complete
         // by the time they reach us (through the `DMLOG BATCH` file),
         // and processing them linearly.
-        f.write_all(format!("TRX_LOG {}", log).as_bytes());
+        self.file.write_all(format!("TRX_LOG {}", log).as_bytes());
 
         if let Some(transaction) = self.trxs.last_mut() {
             transaction.add_log(log);
@@ -197,13 +197,12 @@ impl<'a> DMBatchContext {
     }
 
     pub fn trx_end(&mut self) {
-        let f = unsafe { &mut File::from_raw_fd(self.fd) };
         //println!("DMLOG TRX_LOG {} {} {}", slot_num, tx.signatures[0], hex::encode(log));
         //
         // We shouldn't need the `tx.signatures[0]` nor the `slot_num`
         // now because we'll be processing batches that are complete
         // by the time they reach us (through the `DMLOG BATCH` file),
         // and processing them linearly.
-        f.write_all("TRX_END".as_bytes());
+        self.file.write_all("TRX_END".as_bytes());
     }
 }
