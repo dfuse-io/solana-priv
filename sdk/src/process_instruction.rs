@@ -64,6 +64,9 @@ pub trait InvokeContext {
     fn is_feature_active(&self, feature_id: &Pubkey) -> bool;
     /// Get an account from a pre-account
     fn get_account(&self, pubkey: &Pubkey) -> Option<RefCell<Account>>;
+
+    fn dmbatch_start_instruction(&self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]);
+    fn dmbatch_end_instruction(&self);
 }
 
 #[derive(Clone, Copy, Debug, AbiExample)]
@@ -354,5 +357,10 @@ impl InvokeContext for MockInvokeContext {
     }
     fn get_account(&self, _pubkey: &Pubkey) -> Option<RefCell<Account>> {
         None
+    }
+
+    fn dmbatch_start_instruction(&self, _program_id: Pubkey, _keyed_accounts: &[KeyedAccount], _instruction_data: &[u8]) {
+    }
+    fn dmbatch_end_instruction(&self) {
     }
 }

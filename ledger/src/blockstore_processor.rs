@@ -45,11 +45,13 @@ use std::{
     result,
     sync::Arc,
     time::{Duration, Instant},
+    fs::File,
+    rc::Rc,
+    os::unix::io::{IntoRawFd, RawFd},
+    sync::atomic::{AtomicU64, Ordering, AtomicUsize},
 };
 use thiserror::Error;
-use std::sync::atomic::{AtomicU64, Ordering};
 use solana_sdk::deepmind::DMBatchContext;
-use std::rc::Rc;
 
 pub type BlockstoreProcessorResult =
     result::Result<(BankForks, LeaderScheduleCache), BlockstoreProcessorError>;
@@ -106,7 +108,7 @@ fn execute_batch(
     bank: &Arc<Bank>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
-    dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>
+    dmbatch_context: &Option<Rc<RefCell<DMBatchContext>>>
 ) -> Result<()> {
     let (tx_results, balances, inner_instructions, transaction_logs) =
         batch.bank().load_execute_and_commit_transactions(
@@ -165,8 +167,8 @@ fn execute_batches(
                 .map_with(transaction_status_sender, |sender, batch| {
                     let batch_id = i.fetch_add(1, Ordering::Relaxed);
                     let file_number = GLOBAL_DEEP_MIND_FILE_NUMBER.fetch_add(1, Ordering::SeqCst);
-                    let file_path = format!("/tmp/dmlog-{}-{}", old_count + 1, batch_id);
-                    let fl = File::create(file_path).unwrap();
+                    let file_path = format!("/tmp/dmlog-{}-{}", file_number + 1, batch_id);
+                    let fl = File::create(&file_path).unwrap();
                     let raw_fd: RawFd = fl.into_raw_fd();
                     let dmbatch_context = DMBatchContext {
                         batch_number: batch_id,
@@ -175,12 +177,16 @@ fn execute_batches(
                         path: file_path,
                     };
                     let dmbatch_ctx_opt = Some(Rc::new(RefCell::new(dmbatch_context)));
-                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, dmbatch_ctx_opt);
+                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, &dmbatch_ctx_opt);
                     if let Some(entry_callback) = entry_callback {
                         entry_callback(bank);
                     }
 
-                    dmbatch_context.flush();
+                    if let Some(ctx_ref) = &dmbatch_ctx_opt {
+                        // let ctx = ctx_ref.deref();
+                        ctx_ref.borrow_mut().flush();
+                    }
+
 
                     result
                 })
@@ -3004,7 +3010,7 @@ pub mod tests {
             false,
             false,
             false,
-            None,
+            &None,
         );
         let (err, signature) = get_first_error(&batch, fee_collection_results).unwrap();
         // First error found should be for the 2nd transaction, due to iteration_order

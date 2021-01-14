@@ -547,7 +547,7 @@ impl BankingStage {
             MAX_PROCESSING_AGE,
             transaction_status_sender.is_some(),
             transaction_status_sender.is_some(),
-            None,
+            &None,
         );
         load_execute_time.stop();
 

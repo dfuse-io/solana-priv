@@ -2362,7 +2362,7 @@ impl Bank {
             MAX_PROCESSING_AGE - MAX_TRANSACTION_FORWARDING_DELAY,
             false,
             true,
-            None,
+            &None,
         );
 
         let transaction_result = executed[0].0.clone().map(|_| ());
@@ -2773,7 +2773,7 @@ impl Bank {
         max_age: usize,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
-        dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>
+        dmbatch_context: &Option<Rc<RefCell<DMBatchContext>>>
     ) -> (
         Vec<TransactionLoadResult>,
         Vec<TransactionExecutionResult>,
@@ -3723,7 +3723,7 @@ impl Bank {
         collect_balances: bool,
         enable_cpi_recording: bool,
         enable_log_recording: bool,
-        dmbatch_context: Option<Rc<RefCell<DMBatchContext>>>
+        dmbatch_context: &Option<Rc<RefCell<DMBatchContext>>>
     ) -> (
         TransactionResults,
         TransactionBalancesSet,
@@ -3776,7 +3776,7 @@ impl Bank {
     #[must_use]
     pub fn process_transactions(&self, txs: &[Transaction]) -> Vec<Result<()>> {
         let batch = self.prepare_batch(txs, None);
-        self.load_execute_and_commit_transactions(&batch, MAX_PROCESSING_AGE, false, false, false, None)
+        self.load_execute_and_commit_transactions(&batch, MAX_PROCESSING_AGE, false, false, false, &None)
             .0
             .fee_collection_results
     }
@@ -7579,7 +7579,7 @@ pub(crate) mod tests {
                 false,
                 false,
                 false,
-                None,
+                &None,
             )
             .0
             .fee_collection_results;
@@ -9555,7 +9555,7 @@ pub(crate) mod tests {
                 true,
                 false,
                 false,
-                None,
+                &None,
             );
 
         assert!(inner_instructions[0].iter().all(|ix| ix.is_empty()));

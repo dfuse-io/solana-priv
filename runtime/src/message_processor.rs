@@ -348,6 +348,20 @@ impl<'a> InvokeContext for ThisInvokeContext<'a> {
             }
         })
     }
+
+    fn dmbatch_start_instruction(&self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
+        if let Some(ctx_ref) = &self.dmbatch_context {
+            let ctx = ctx_ref.deref();
+            ctx.borrow_mut().start_instruction(program_id, keyed_accounts, instruction_data);
+        }
+    }
+
+    fn dmbatch_end_instruction(&self) {
+        if let Some(ctx_ref) = &self.dmbatch_context {
+            let ctx = ctx_ref.deref();
+            ctx.borrow_mut().end_instruction();
+        }
+    }
 }
 pub struct ThisLogger {
     log_collector: Option<Rc<LogCollector>>,
@@ -693,23 +707,7 @@ impl MessageProcessor {
             // 1) Store the current parent ordinal number to restore after the inner call is completed
             // 2) The current ordinal number will be the parent for the next calls
             // 3) Increment the ordinal number
-            //********************************************************
-
-            // let dmglog_ctx = invoke_context.get_dmlog_ctx();
-            // if let Some(ctx) = dmglog_ctx {
-            //     ctx.start_instruction(*program_id, &keyed_accounts, &instruction.data)
-            // }
-
-            if let Some(ctx_ref) = &dmbatch_context {
-                let ctx = ctx_ref.deref();
-                ctx.borrow_mut().start_instruction(*program_id, &keyed_accounts, &instruction.data);
-            }
-
-            // let dmlog_ctx = invoke_context.get_dmlog_mut();
-            // let dmlog_prev_parent_ordinal_number = dmlog_ctx.get_parent_ordinal_number();
-            // dmlog_ctx.set_parent_ordinal_number(dmlog_ctx.get_ordinal_number());
-            // dmlog_ctx.inc_ordinal_number();
-            // dmlog_ctx.print_instruction_start(*program_id, &keyed_accounts, &instruction.data);
+            invoke_context.dmbatch_start_instruction(*program_id, &keyed_accounts, &instruction.data);
             //****************************************************************
 
             let mut message_processor = MessageProcessor::default();
@@ -729,10 +727,12 @@ impl MessageProcessor {
                 result = invoke_context.verify_and_update(message, instruction, accounts);
             }
             invoke_context.pop();
+
+
             //*********************************************************************************
-            // DMLOG: The inner call is completed.. we need to restore the parent ordinal number
+            // DMLOG: The inner call is completed..
             //**********************************************************************************
-            // invoke_context.get_dmlog_mut().set_parent_ordinal_number(dmlog_prev_parent_ordinal_number);
+            invoke_context.dmbatch_end_instruction();
             //****************************************************************
 
             result
@@ -808,15 +808,11 @@ impl MessageProcessor {
                 let pre_lamports = pre_accounts[unique_index].lamports();
                 let post_lamports = account.lamports;
 
-                // if let Some(dmlog_ctx) = dmlogbatch_ctx {
-                //     if pre_lamports != post_lamports {
-                //         dmlog_ctx.print_lamport_change(
-                //             account.owner,
-                //             pre_lamports,
-                //             post_lamports,
-                //         );
-                //     }
-                // }
+
+                if let Some(ctx_ref) = dmbatch_context {
+                    let ctx = ctx_ref.deref();
+                    ctx.borrow_mut().lamport_change(account.owner, pre_lamports, post_lamports)
+                }
 
                 pre_sum += u128::from(pre_lamports);
                 post_sum += u128::from(post_lamports);
@@ -962,6 +958,16 @@ impl MessageProcessor {
             &rent_collector.rent,
             invoke_context.dmbatch_context,
         )?;
+
+        //****************************************************************
+        // DMLOG: This is the call entry point for top level instructions
+        //****************************************************************
+        if let Some(ctx_ref) = &dmbatch_context {
+            let ctx = ctx_ref.deref();
+            ctx.borrow_mut().end_instruction();
+        }
+        //****************************************************************
+
         Ok(())
     }
 
