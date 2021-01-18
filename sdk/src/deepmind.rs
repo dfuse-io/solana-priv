@@ -40,8 +40,8 @@ impl Instruction {
             new_data_length: post_len.to_u64().unwrap_or(0),
             ..Default::default()
         };
-        account.prev_data.copy_from_slice(pre);
-        account.new_data.copy_from_slice(post);
+        account.prev_data.extend_from_slice(pre);
+        account.new_data.extend_from_slice(post);
         self.account_changes.push(account);
     }
 
@@ -57,7 +57,8 @@ impl Instruction {
 #[derive(Default)]
 pub struct DMTransaction {
     pub pb_transaction: Transaction,
-    pub current_instruction_index: usize,
+
+    pub call_stack: Vec<usize>,
 }
 
 impl DMTransaction {
@@ -66,24 +67,28 @@ impl DMTransaction {
             |i| format!("{}", i.unsigned_key())
         ).collect();
 
-        let inst_ordinal = self.current_instruction_index.to_u32().unwrap_or(0);
+        let parent_ordinal= *self.call_stack.last().unwrap();
+        let inst_ordinal = self.pb_transaction.instructions.len() + 1;
+        self.call_stack.push(inst_ordinal);
+
         let mut inst = Instruction{
             program_id: format!("{}", program_id),
             account_keys: accounts,
             data: Vec::with_capacity(instruction_data.len()),
-            ordinal: (inst_ordinal + 1),
-            parent_ordinal: inst_ordinal,
+            ordinal: inst_ordinal as u32,
+            parent_ordinal: parent_ordinal as u32,
+            depth: (self.call_stack.len() - 1) as u32,
             balance_changes: RepeatedField::default(),
             account_changes: RepeatedField::default(),
             ..Default::default()
         };
-        inst.data.copy_from_slice(instruction_data);
+        inst.data.extend_from_slice(instruction_data);
         self.pb_transaction.instructions.push(inst);
-        self.current_instruction_index = self.pb_transaction.instructions.len();
+
     }
 
     pub fn end_instruction(&mut self) {
-        self.current_instruction_index -= 1;
+        self.call_stack.pop();
     }
 
     pub fn add_log(&mut self, log: String) {
@@ -91,7 +96,7 @@ impl DMTransaction {
     }
 
     pub fn active_instruction(&mut self) -> &mut Instruction {
-        return self.pb_transaction.instructions[self.current_instruction_index].borrow_mut();
+        return self.pb_transaction.instructions[(self.call_stack.last().unwrap() - 1)].borrow_mut();
     }
 
 }
@@ -121,7 +126,7 @@ impl<'a> DMBatchContext {
         };
         self.trxs.push(DMTransaction{
             pb_transaction: trx,
-            current_instruction_index: 0,
+            call_stack: vec![0]
         })
     }
 
