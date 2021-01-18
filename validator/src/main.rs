@@ -39,7 +39,7 @@ use solana_sdk::{
     genesis_config::GenesisConfig,
     hash::Hash,
     pubkey::Pubkey,
-    deepmind::{enable_deepmind, deepmind_enabled},
+    deepmind::enable_deepmind,
     signature::{Keypair, Signer},
 };
 use std::{
@@ -1489,9 +1489,9 @@ pub fn main() {
         )
         .arg(
             Arg::with_name("deepmind")
-                .long("--deepmind")
+                .long("deepmind")
                 .takes_value(false)
-                .help("Activate/deactivate deep-mind instrumentation, disabled by default"),
+                .help("Activate/deactivate deep-mind instrumentation, disabled by default. You can override output directory using the DEEPMIND_BATCH_FILES_PATH environment variable."),
         )
         .get_matches();
 
@@ -1518,9 +1518,6 @@ pub fn main() {
 
     if matches.is_present("deepmind") {
         enable_deepmind();
-    }
-
-    if deepmind_enabled() {
         println!("DMLOG INIT VERSION 1");
     }
 

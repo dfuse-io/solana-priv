@@ -45,7 +45,6 @@ use std::{
     result,
     sync::Arc,
     time::{Duration, Instant},
-    fs::File,
     rc::Rc,
     sync::atomic::{AtomicU64, Ordering, AtomicUsize},
 };
@@ -168,15 +167,8 @@ fn execute_batches(
                     if deepmind_enabled() {
                         let batch_id = i.fetch_add(1, Ordering::Relaxed);
                         let file_number = GLOBAL_DEEP_MIND_FILE_NUMBER.fetch_add(1, Ordering::SeqCst);
-                        let file_path = format!("/tmp/dmlog-{}-{}", file_number + 1, batch_id);
-                        let fl = File::create(&file_path).unwrap();
-                        let dmbatch_context = DMBatchContext {
-                            batch_number: batch_id,
-                            trxs: Vec::new(),
-                            file: fl,
-                            path: file_path,
-                        };
-                        dmbatch_ctx_opt = Some(Rc::new(RefCell::new(dmbatch_context)));
+                        let ctx = DMBatchContext::new(batch_id, file_number);
+                        dmbatch_ctx_opt = Some(Rc::new(RefCell::new(ctx)));
                     }
                     let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, &dmbatch_ctx_opt);
                     if let Some(entry_callback) = entry_callback {
