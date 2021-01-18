@@ -145,7 +145,7 @@ impl<'a> DMBatchContext {
         }
 
         drop(&self.file);
-        println!("DMLOG BATCH {}", self.path);
+        println!("DMLOG BATCH_FILE {}", self.path);
     }
 
     pub fn start_instruction(&mut self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
