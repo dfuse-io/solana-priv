@@ -100,19 +100,25 @@ pub struct DMBatchContext {
     pub trxs: Vec<DMTransaction>,
     pub file: File,
     pub path: String,
+    pub filename: String
 }
 
 impl<'a> DMBatchContext {
     pub fn new(batch_id: u64, file_number: usize) -> DMBatchContext {
-        let file_path = format!(
-            "{}dmlog-{}-{}",
-            env::var("DEEPMIND_BATCH_FILES_PATH").unwrap_or(String::from_str("/tmp/").unwrap()),
+        let filename = format!(
+            "dmlog-{}-{}",
             file_number + 1,
             batch_id
+        );
+        let file_path = format!(
+            "{}{}",
+            env::var("DEEPMIND_BATCH_FILES_PATH").unwrap_or(String::from_str("/tmp/").unwrap()),
+            filename,
         );
         let fl = File::create(&file_path).unwrap();
         DMBatchContext {
             batch_number: batch_id,
+            filename: filename,
             trxs: Vec::new(),
             file: fl,
             path: file_path,
@@ -174,7 +180,7 @@ impl<'a> DMBatchContext {
         }
 
         drop(&self.file);
-        println!("DMLOG BATCH_FILE {}", self.path);
+        println!("DMLOG BATCH_FILE {}", self.filename);
     }
 
     pub fn start_instruction(
