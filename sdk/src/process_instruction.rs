@@ -65,7 +65,7 @@ pub trait InvokeContext {
     /// Get an account from a pre-account
     fn get_account(&self, pubkey: &Pubkey) -> Option<RefCell<Account>>;
 
-    fn dmbatch_start_instruction(&self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]);
+    fn dmbatch_start_instruction(&self, program_id: Pubkey, keyed_accounts: &[String], instruction_data: &[u8]);
     fn dmbatch_end_instruction(&self);
 }
 
@@ -359,7 +359,7 @@ impl InvokeContext for MockInvokeContext {
         None
     }
 
-    fn dmbatch_start_instruction(&self, _program_id: Pubkey, _keyed_accounts: &[KeyedAccount], _instruction_data: &[u8]) {
+    fn dmbatch_start_instruction(&self, _program_id: Pubkey, _keyed_accounts: &[String], _instruction_data: &[u8]) {
     }
     fn dmbatch_end_instruction(&self) {
     }

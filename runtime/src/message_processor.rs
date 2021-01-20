@@ -349,7 +349,7 @@ impl<'a> InvokeContext for ThisInvokeContext<'a> {
         })
     }
 
-    fn dmbatch_start_instruction(&self, program_id: Pubkey, keyed_accounts: &[KeyedAccount], instruction_data: &[u8]) {
+    fn dmbatch_start_instruction(&self, program_id: Pubkey, keyed_accounts: &[String], instruction_data: &[u8]) {
         if let Some(ctx_ref) = &self.dmbatch_context {
             let ctx = ctx_ref.deref();
             ctx.borrow_mut().start_instruction(program_id, keyed_accounts, instruction_data);
@@ -707,7 +707,17 @@ impl MessageProcessor {
             // 1) Store the current parent ordinal number to restore after the inner call is completed
             // 2) The current ordinal number will be the parent for the next calls
             // 3) Increment the ordinal number
-            invoke_context.dmbatch_start_instruction(*program_id, &keyed_accounts, &instruction.data);
+
+            let instruction_accounts: Vec<String> = instruction
+                .accounts
+                .iter()
+                .map(|&index| {
+                    let index = index as usize;
+                    let key = &message.account_keys[index];
+                    format!("{}", key)
+                })
+                .collect();
+            invoke_context.dmbatch_start_instruction(*program_id, &instruction_accounts, &instruction.data);
             //****************************************************************
 
             let mut message_processor = MessageProcessor::default();
@@ -920,12 +930,25 @@ impl MessageProcessor {
         let keyed_accounts =
             Self::create_keyed_accounts(message, instruction, executable_accounts, accounts)?;
 
+
+
+
+
         //****************************************************************
         // DMLOG: This is the call entry point for top level instructions
         //****************************************************************
         if let Some(ctx_ref) = &dmbatch_context {
             let ctx = ctx_ref.deref();
-            ctx.borrow_mut().start_instruction(*program_id, &keyed_accounts, &instruction.data);
+            let instruction_accounts: Vec<String> = instruction
+                .accounts
+                .iter()
+                .map(|&index| {
+                    let index = index as usize;
+                    let key = &message.account_keys[index];
+                    format!("{}", key)
+                })
+                .collect();
+            ctx.borrow_mut().start_instruction(*program_id, &instruction_accounts, &instruction.data);
         }
         //****************************************************************
 

@@ -54,12 +54,12 @@ impl DMTransaction {
     pub fn start_instruction(
         &mut self,
         program_id: Pubkey,
-        keyed_accounts: &[KeyedAccount],
+        keyed_accounts: &[String],
         instruction_data: &[u8],
     ) {
         let accounts: RepeatedField<String> = keyed_accounts
             .into_iter()
-            .map(|i| format!("{}", i.unsigned_key()))
+            .map(|i| format!("{}", i))
             .collect();
 
         let parent_ordinal = *self.call_stack.last().unwrap();
@@ -186,7 +186,7 @@ impl<'a> DMBatchContext {
     pub fn start_instruction(
         &mut self,
         program_id: Pubkey,
-        keyed_accounts: &[KeyedAccount],
+        keyed_accounts: &[String],
         instruction_data: &[u8],
     ) {
         if let Some(transaction) = self.trxs.last_mut() {
