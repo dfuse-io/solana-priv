@@ -3,13 +3,15 @@
 #[macro_use]
 extern crate solana_bpf_loader_program;
 
+use itertools::izip;
 use solana_bpf_loader_program::{
     create_vm,
     serialization::{deserialize_parameters, serialize_parameters},
 };
+use solana_cli_output::display::println_transaction;
 use solana_rbpf::vm::EbpfVm;
 use solana_runtime::{
-    bank::Bank,
+    bank::{Bank, ExecuteTimings, NonceRollbackInfo, TransactionBalancesSet, TransactionResults},
     bank_client::BankClient,
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
     loader_utils::{
@@ -28,11 +30,16 @@ use solana_sdk::{
     message::Message,
     process_instruction::MockInvokeContext,
     pubkey::Pubkey,
-    signature::{Keypair, Signer},
+    signature::{keypair_from_seed, Keypair, Signer},
+    system_instruction,
     sysvar::{clock, fees, rent, slot_hashes, stake_history},
     transaction::{Transaction, TransactionError},
 };
-use std::{cell::RefCell, env, fs::File, io::Read, path::PathBuf, sync::Arc};
+use solana_transaction_status::{
+    token_balances::collect_token_balances, ConfirmedTransaction, InnerInstructions,
+    TransactionStatusMeta, TransactionWithStatusMeta, UiTransactionEncoding,
+};
+use std::{cell::RefCell, collections::HashMap, env, fs::File, io::Read, path::PathBuf, sync::Arc};
 
 /// BPF program file extension
 const PLATFORM_FILE_EXTENSION_BPF: &str = "so";
@@ -98,20 +105,31 @@ fn write_bpf_program(
 fn load_upgradeable_bpf_program(
     bank_client: &BankClient,
     payer_keypair: &Keypair,
+    buffer_keypair: &Keypair,
+    executable_keypair: &Keypair,
+    authority_keypair: &Keypair,
     name: &str,
-) -> (Pubkey, Keypair) {
+) {
     let path = create_bpf_path(name);
     let mut file = File::open(&path).unwrap_or_else(|err| {
         panic!("Failed to open {}: {}", path.display(), err);
     });
     let mut elf = Vec::new();
     file.read_to_end(&mut elf).unwrap();
-    load_upgradeable_program(bank_client, payer_keypair, elf)
+    load_upgradeable_program(
+        bank_client,
+        payer_keypair,
+        buffer_keypair,
+        executable_keypair,
+        authority_keypair,
+        elf,
+    );
 }
 
 fn upgrade_bpf_program(
     bank_client: &BankClient,
     payer_keypair: &Keypair,
+    buffer_keypair: &Keypair,
     executable_pubkey: &Pubkey,
     authority_keypair: &Keypair,
     name: &str,
@@ -122,15 +140,21 @@ fn upgrade_bpf_program(
     });
     let mut elf = Vec::new();
     file.read_to_end(&mut elf).unwrap();
-    let buffer_pubkey = load_buffer_account(bank_client, payer_keypair, &elf);
+    load_buffer_account(
+        bank_client,
+        payer_keypair,
+        &buffer_keypair,
+        authority_keypair,
+        &elf,
+    );
     upgrade_program(
         bank_client,
         payer_keypair,
         executable_pubkey,
-        &buffer_pubkey,
+        &buffer_keypair.pubkey(),
         &authority_keypair,
         &payer_keypair.pubkey(),
-    )
+    );
 }
 
 fn run_program(
@@ -184,8 +208,13 @@ fn process_transaction_and_record_inner(
         false,
         true,
         false,
+        &mut ExecuteTimings::default(),
     );
-    let inner_instructions = inner.swap_remove(0);
+    let inner_instructions = if inner.is_empty() {
+        Some(vec![vec![]])
+    } else {
+        inner.swap_remove(0)
+    };
     let result = results
         .fee_collection_results
         .swap_remove(0)
@@ -194,6 +223,109 @@ fn process_transaction_and_record_inner(
         result,
         inner_instructions.expect("cpi recording should be enabled"),
     )
+}
+
+fn execute_transactions(bank: &Bank, txs: &[Transaction]) -> Vec<ConfirmedTransaction> {
+    let batch = bank.prepare_batch(txs, None);
+    let mut timings = ExecuteTimings::default();
+    let mut mint_decimals = HashMap::new();
+    let tx_pre_token_balances = collect_token_balances(&bank, &batch, &mut mint_decimals);
+    let (
+        TransactionResults {
+            execution_results, ..
+        },
+        TransactionBalancesSet {
+            pre_balances,
+            post_balances,
+            ..
+        },
+        mut inner_instructions,
+        mut transaction_logs,
+    ) = bank.load_execute_and_commit_transactions(
+        &batch,
+        std::usize::MAX,
+        true,
+        true,
+        true,
+        &mut timings,
+    );
+    let tx_post_token_balances = collect_token_balances(&bank, &batch, &mut mint_decimals);
+
+    for _ in 0..(txs.len() - transaction_logs.len()) {
+        transaction_logs.push(vec![]);
+    }
+    for _ in 0..(txs.len() - inner_instructions.len()) {
+        inner_instructions.push(None);
+    }
+
+    izip!(
+        txs.iter(),
+        execution_results.into_iter(),
+        inner_instructions.into_iter(),
+        pre_balances.into_iter(),
+        post_balances.into_iter(),
+        tx_pre_token_balances.into_iter(),
+        tx_post_token_balances.into_iter(),
+        transaction_logs.into_iter(),
+    )
+    .map(
+        |(
+            tx,
+            (execute_result, nonce_rollback),
+            inner_instructions,
+            pre_balances,
+            post_balances,
+            pre_token_balances,
+            post_token_balances,
+            log_messages,
+        )| {
+            let fee_calculator = nonce_rollback
+                .map(|nonce_rollback| nonce_rollback.fee_calculator())
+                .unwrap_or_else(|| bank.get_fee_calculator(&tx.message().recent_blockhash))
+                .expect("FeeCalculator must exist");
+            let fee = fee_calculator.calculate_fee(tx.message());
+
+            let inner_instructions = inner_instructions.map(|inner_instructions| {
+                inner_instructions
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, instructions)| InnerInstructions {
+                        index: index as u8,
+                        instructions,
+                    })
+                    .filter(|i| !i.instructions.is_empty())
+                    .collect()
+            });
+
+            let tx_status_meta = TransactionStatusMeta {
+                status: execute_result,
+                fee,
+                pre_balances,
+                post_balances,
+                pre_token_balances: Some(pre_token_balances),
+                post_token_balances: Some(post_token_balances),
+                inner_instructions,
+                log_messages: Some(log_messages),
+            };
+
+            ConfirmedTransaction {
+                slot: bank.slot(),
+                transaction: TransactionWithStatusMeta {
+                    transaction: tx.clone(),
+                    meta: Some(tx_status_meta),
+                },
+                block_time: None,
+            }
+        },
+    )
+    .collect()
+}
+
+fn print_confirmed_tx(name: &str, confirmed_tx: ConfirmedTransaction) {
+    let tx = confirmed_tx.transaction.transaction.clone();
+    let encoded = confirmed_tx.encode(UiTransactionEncoding::JsonParsed);
+    println!("EXECUTE {} (slot {})", name, encoded.slot);
+    println_transaction(&tx, &encoded.transaction.meta, "  ");
 }
 
 #[test]
@@ -510,7 +642,7 @@ fn test_program_bpf_error_handling() {
 }
 
 #[test]
-fn test_program_bpf_invoke() {
+fn test_program_bpf_invoke_sanity() {
     solana_logger::setup();
 
     const TEST_SUCCESS: u8 = 1;
@@ -524,6 +656,8 @@ fn test_program_bpf_invoke() {
     const TEST_INSTRUCTION_DATA_TOO_LARGE: u8 = 9;
     const TEST_INSTRUCTION_META_TOO_LARGE: u8 = 10;
     const TEST_RETURN_ERROR: u8 = 11;
+    const TEST_PRIVILEGE_DEESCALATION_ESCALATION_SIGNER: u8 = 12;
+    const TEST_PRIVILEGE_DEESCALATION_ESCALATION_WRITABLE: u8 = 13;
 
     #[allow(dead_code)]
     #[derive(Debug)]
@@ -621,15 +755,16 @@ fn test_program_bpf_invoke() {
         );
         let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
         assert!(result.is_ok());
+
         let invoked_programs: Vec<Pubkey> = inner_instructions[0]
             .iter()
             .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
             .collect();
-
         let expected_invoked_programs = match program.0 {
             Languages::C => vec![
                 solana_sdk::system_program::id(),
                 solana_sdk::system_program::id(),
+                invoked_program_id.clone(),
                 invoked_program_id.clone(),
                 invoked_program_id.clone(),
                 invoked_program_id.clone(),
@@ -655,11 +790,11 @@ fn test_program_bpf_invoke() {
                 invoked_program_id.clone(),
                 invoked_program_id.clone(),
                 invoked_program_id.clone(),
+                invoked_program_id.clone(),
             ],
         };
         assert_eq!(invoked_programs.len(), expected_invoked_programs.len());
         assert_eq!(invoked_programs, expected_invoked_programs);
-
         let no_invoked_programs: Vec<Pubkey> = inner_instructions[1]
             .iter()
             .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
@@ -668,281 +803,96 @@ fn test_program_bpf_invoke() {
 
         // failure cases
 
-        let instruction = Instruction::new(
-            invoke_program_id,
-            &[
-                TEST_PRIVILEGE_ESCALATION_SIGNER,
-                bump_seed1,
-                bump_seed2,
-                bump_seed3,
-            ],
-            account_metas.clone(),
-        );
-        let message = Message::new(&[instruction], Some(&mint_pubkey));
-        let tx = Transaction::new(
-            &[
-                &mint_keypair,
-                &argument_keypair,
-                &invoked_argument_keypair,
-                &from_keypair,
-            ],
-            message.clone(),
-            bank.last_blockhash(),
+        let do_invoke_failure_test_local =
+            |test: u8, expected_error: TransactionError, expected_invoked_programs: &[Pubkey]| {
+                println!("Running failure test #{:?}", test);
+                let instruction_data = &[test, bump_seed1, bump_seed2, bump_seed3];
+                let signers = vec![
+                    &mint_keypair,
+                    &argument_keypair,
+                    &invoked_argument_keypair,
+                    &from_keypair,
+                ];
+                let instruction =
+                    Instruction::new(invoke_program_id, instruction_data, account_metas.clone());
+                let message = Message::new(&[instruction], Some(&mint_pubkey));
+                let tx = Transaction::new(&signers, message.clone(), bank.last_blockhash());
+                let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
+                let invoked_programs: Vec<Pubkey> = inner_instructions[0]
+                    .iter()
+                    .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
+                    .collect();
+                assert_eq!(result.unwrap_err(), expected_error);
+                assert_eq!(invoked_programs, expected_invoked_programs);
+            };
+
+        do_invoke_failure_test_local(
+            TEST_PRIVILEGE_ESCALATION_SIGNER,
+            TransactionError::InstructionError(0, InstructionError::PrivilegeEscalation),
+            &[invoked_program_id.clone()],
         );
 
-        let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
-        let invoked_programs: Vec<Pubkey> = inner_instructions[0]
-            .iter()
-            .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
-            .collect();
-        assert_eq!(invoked_programs, vec![invoked_program_id.clone()]);
-        assert_eq!(
-            result.unwrap_err(),
-            TransactionError::InstructionError(0, InstructionError::PrivilegeEscalation)
+        do_invoke_failure_test_local(
+            TEST_PRIVILEGE_ESCALATION_WRITABLE,
+            TransactionError::InstructionError(0, InstructionError::PrivilegeEscalation),
+            &[invoked_program_id.clone()],
         );
 
-        let instruction = Instruction::new(
-            invoke_program_id,
-            &[
-                TEST_PRIVILEGE_ESCALATION_WRITABLE,
-                bump_seed1,
-                bump_seed2,
-                bump_seed3,
-            ],
-            account_metas.clone(),
-        );
-        let message = Message::new(&[instruction], Some(&mint_pubkey));
-        let tx = Transaction::new(
-            &[
-                &mint_keypair,
-                &argument_keypair,
-                &invoked_argument_keypair,
-                &from_keypair,
-            ],
-            message.clone(),
-            bank.last_blockhash(),
-        );
-        let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
-        let invoked_programs: Vec<Pubkey> = inner_instructions[0]
-            .iter()
-            .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
-            .collect();
-        assert_eq!(invoked_programs, vec![invoked_program_id.clone()]);
-        assert_eq!(
-            result.unwrap_err(),
-            TransactionError::InstructionError(0, InstructionError::PrivilegeEscalation)
+        do_invoke_failure_test_local(
+            TEST_PPROGRAM_NOT_EXECUTABLE,
+            TransactionError::InstructionError(0, InstructionError::AccountNotExecutable),
+            &[argument_keypair.pubkey().clone()],
         );
 
-        let instruction = Instruction::new(
-            invoke_program_id,
-            &[
-                TEST_PPROGRAM_NOT_EXECUTABLE,
-                bump_seed1,
-                bump_seed2,
-                bump_seed3,
-            ],
-            account_metas.clone(),
-        );
-        let message = Message::new(&[instruction], Some(&mint_pubkey));
-        let tx = Transaction::new(
-            &[
-                &mint_keypair,
-                &argument_keypair,
-                &invoked_argument_keypair,
-                &from_keypair,
-            ],
-            message.clone(),
-            bank.last_blockhash(),
-        );
-        let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
-        let invoked_programs: Vec<Pubkey> = inner_instructions[0]
-            .iter()
-            .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
-            .collect();
-        assert_eq!(invoked_programs, vec![argument_keypair.pubkey().clone()]);
-        assert_eq!(
-            result.unwrap_err(),
-            TransactionError::InstructionError(0, InstructionError::AccountNotExecutable)
+        do_invoke_failure_test_local(
+            TEST_EMPTY_ACCOUNTS_SLICE,
+            TransactionError::InstructionError(0, InstructionError::MissingAccount),
+            &[],
         );
 
-        let instruction = Instruction::new(
-            invoke_program_id,
-            &[
-                TEST_EMPTY_ACCOUNTS_SLICE,
-                bump_seed1,
-                bump_seed2,
-                bump_seed3,
-            ],
-            account_metas.clone(),
-        );
-        let message = Message::new(&[instruction], Some(&mint_pubkey));
-        let tx = Transaction::new(
-            &[
-                &mint_keypair,
-                &argument_keypair,
-                &invoked_argument_keypair,
-                &from_keypair,
-            ],
-            message.clone(),
-            bank.last_blockhash(),
-        );
-        let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
-        let invoked_programs: Vec<Pubkey> = inner_instructions[0]
-            .iter()
-            .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
-            .collect();
-        assert_eq!(invoked_programs, vec![]);
-        assert_eq!(
-            result.unwrap_err(),
-            TransactionError::InstructionError(0, InstructionError::MissingAccount)
+        do_invoke_failure_test_local(
+            TEST_CAP_SEEDS,
+            TransactionError::InstructionError(0, InstructionError::MaxSeedLengthExceeded),
+            &[],
         );
 
-        let instruction = Instruction::new(
-            invoke_program_id,
-            &[TEST_CAP_SEEDS, bump_seed1, bump_seed2, bump_seed3],
-            account_metas.clone(),
-        );
-        let message = Message::new(&[instruction], Some(&mint_pubkey));
-        let tx = Transaction::new(
-            &[
-                &mint_keypair,
-                &argument_keypair,
-                &invoked_argument_keypair,
-                &from_keypair,
-            ],
-            message.clone(),
-            bank.last_blockhash(),
-        );
-        let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
-        let invoked_programs: Vec<Pubkey> = inner_instructions[0]
-            .iter()
-            .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
-            .collect();
-        assert_eq!(invoked_programs, vec![]);
-        assert_eq!(
-            result.unwrap_err(),
-            TransactionError::InstructionError(0, InstructionError::MaxSeedLengthExceeded)
+        do_invoke_failure_test_local(
+            TEST_CAP_SIGNERS,
+            TransactionError::InstructionError(0, InstructionError::ProgramFailedToComplete),
+            &[],
         );
 
-        let instruction = Instruction::new(
-            invoke_program_id,
-            &[TEST_CAP_SIGNERS, bump_seed1, bump_seed2, bump_seed3],
-            account_metas.clone(),
-        );
-        let message = Message::new(&[instruction], Some(&mint_pubkey));
-        let tx = Transaction::new(
-            &[
-                &mint_keypair,
-                &argument_keypair,
-                &invoked_argument_keypair,
-                &from_keypair,
-            ],
-            message.clone(),
-            bank.last_blockhash(),
-        );
-        let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
-        let invoked_programs: Vec<Pubkey> = inner_instructions[0]
-            .iter()
-            .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
-            .collect();
-        assert_eq!(invoked_programs, vec![]);
-        assert_eq!(
-            result.unwrap_err(),
-            TransactionError::InstructionError(0, InstructionError::ProgramFailedToComplete)
+        do_invoke_failure_test_local(
+            TEST_INSTRUCTION_DATA_TOO_LARGE,
+            TransactionError::InstructionError(0, InstructionError::ComputationalBudgetExceeded),
+            &[],
         );
 
-        let instruction = Instruction::new(
-            invoke_program_id,
-            &[
-                TEST_INSTRUCTION_DATA_TOO_LARGE,
-                bump_seed1,
-                bump_seed2,
-                bump_seed3,
-            ],
-            account_metas.clone(),
-        );
-        let message = Message::new(&[instruction], Some(&mint_pubkey));
-        let tx = Transaction::new(
-            &[
-                &mint_keypair,
-                &argument_keypair,
-                &invoked_argument_keypair,
-                &from_keypair,
-            ],
-            message.clone(),
-            bank.last_blockhash(),
-        );
-        let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
-        let invoked_programs: Vec<Pubkey> = inner_instructions[0]
-            .iter()
-            .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
-            .collect();
-        assert_eq!(invoked_programs, vec![]);
-        assert_eq!(
-            result.unwrap_err(),
-            TransactionError::InstructionError(0, InstructionError::ComputationalBudgetExceeded)
+        do_invoke_failure_test_local(
+            TEST_INSTRUCTION_META_TOO_LARGE,
+            TransactionError::InstructionError(0, InstructionError::ComputationalBudgetExceeded),
+            &[],
         );
 
-        let instruction = Instruction::new(
-            invoke_program_id,
-            &[
-                TEST_INSTRUCTION_META_TOO_LARGE,
-                bump_seed1,
-                bump_seed2,
-                bump_seed3,
-            ],
-            account_metas.clone(),
-        );
-        let message = Message::new(&[instruction], Some(&mint_pubkey));
-        let tx = Transaction::new(
-            &[
-                &mint_keypair,
-                &argument_keypair,
-                &invoked_argument_keypair,
-                &from_keypair,
-            ],
-            message.clone(),
-            bank.last_blockhash(),
-        );
-        let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
-        let invoked_programs: Vec<Pubkey> = inner_instructions[0]
-            .iter()
-            .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
-            .collect();
-        assert_eq!(invoked_programs, vec![]);
-        assert_eq!(
-            result.unwrap_err(),
-            TransactionError::InstructionError(0, InstructionError::ComputationalBudgetExceeded)
+        do_invoke_failure_test_local(
+            TEST_RETURN_ERROR,
+            TransactionError::InstructionError(0, InstructionError::Custom(42)),
+            &[invoked_program_id.clone()],
         );
 
-        let instruction = Instruction::new(
-            invoke_program_id,
-            &[TEST_RETURN_ERROR, bump_seed1, bump_seed2, bump_seed3],
-            account_metas.clone(),
-        );
-        let message = Message::new(&[instruction], Some(&mint_pubkey));
-        let tx = Transaction::new(
-            &[
-                &mint_keypair,
-                &argument_keypair,
-                &invoked_argument_keypair,
-                &from_keypair,
-            ],
-            message.clone(),
-            bank.last_blockhash(),
-        );
-        let (result, inner_instructions) = process_transaction_and_record_inner(&bank, tx);
-        let invoked_programs: Vec<Pubkey> = inner_instructions[0]
-            .iter()
-            .map(|ix| message.account_keys[ix.program_id_index as usize].clone())
-            .collect();
-        assert_eq!(invoked_programs, vec![invoked_program_id.clone()]);
-        assert_eq!(
-            result.unwrap_err(),
-            TransactionError::InstructionError(0, InstructionError::Custom(42))
+        do_invoke_failure_test_local(
+            TEST_PRIVILEGE_DEESCALATION_ESCALATION_SIGNER,
+            TransactionError::InstructionError(0, InstructionError::PrivilegeEscalation),
+            &[invoked_program_id.clone()],
         );
 
-        // Check final state
+        do_invoke_failure_test_local(
+            TEST_PRIVILEGE_DEESCALATION_ESCALATION_WRITABLE,
+            TransactionError::InstructionError(0, InstructionError::PrivilegeEscalation),
+            &[invoked_program_id.clone()],
+        );
+
+        // Check resulting state
 
         assert_eq!(43, bank.get_balance(&derived_key1));
         let account = bank.get_account(&derived_key1).unwrap();
@@ -991,43 +941,44 @@ fn test_program_bpf_invoke() {
             TransactionError::InstructionError(0, InstructionError::ProgramFailedToComplete)
         );
     }
+}
 
-    // Check the caller has access to cpi program
-    {
-        let GenesisConfigInfo {
-            genesis_config,
-            mint_keypair,
-            ..
-        } = create_genesis_config(50);
-        let mut bank = Bank::new(&genesis_config);
-        let (name, id, entrypoint) = solana_bpf_loader_program!();
-        bank.add_builtin(&name, id, entrypoint);
-        let bank = Arc::new(bank);
-        let bank_client = BankClient::new_shared(&bank);
+#[cfg(feature = "bpf_rust")]
+#[test]
+fn test_program_bpf_caller_has_access_to_cpi_program() {
+    let GenesisConfigInfo {
+        genesis_config,
+        mint_keypair,
+        ..
+    } = create_genesis_config(50);
+    let mut bank = Bank::new(&genesis_config);
+    let (name, id, entrypoint) = solana_bpf_loader_program!();
+    bank.add_builtin(&name, id, entrypoint);
+    let bank = Arc::new(bank);
+    let bank_client = BankClient::new_shared(&bank);
 
-        let caller_pubkey = load_bpf_program(
-            &bank_client,
-            &bpf_loader::id(),
-            &mint_keypair,
-            "solana_bpf_rust_caller_access",
-        );
-        let caller2_pubkey = load_bpf_program(
-            &bank_client,
-            &bpf_loader::id(),
-            &mint_keypair,
-            "solana_bpf_rust_caller_access",
-        );
-        let account_metas = vec![
-            AccountMeta::new_readonly(caller_pubkey, false),
-            AccountMeta::new_readonly(caller2_pubkey, false),
-        ];
-        let instruction = Instruction::new(caller_pubkey, &[1_u8], account_metas.clone());
-        let result = bank_client.send_and_confirm_instruction(&mint_keypair, instruction);
-        assert_eq!(
-            result.unwrap_err().unwrap(),
-            TransactionError::InstructionError(0, InstructionError::MissingAccount)
-        );
-    }
+    let caller_pubkey = load_bpf_program(
+        &bank_client,
+        &bpf_loader::id(),
+        &mint_keypair,
+        "solana_bpf_rust_caller_access",
+    );
+    let caller2_pubkey = load_bpf_program(
+        &bank_client,
+        &bpf_loader::id(),
+        &mint_keypair,
+        "solana_bpf_rust_caller_access",
+    );
+    let account_metas = vec![
+        AccountMeta::new_readonly(caller_pubkey, false),
+        AccountMeta::new_readonly(caller2_pubkey, false),
+    ];
+    let instruction = Instruction::new(caller_pubkey, &[1_u8], account_metas.clone());
+    let result = bank_client.send_and_confirm_instruction(&mint_keypair, instruction);
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        TransactionError::InstructionError(0, InstructionError::MissingAccount)
+    );
 }
 
 #[cfg(feature = "bpf_rust")]
@@ -1475,8 +1426,18 @@ fn test_program_bpf_upgrade() {
     let bank_client = BankClient::new(bank);
 
     // Deploy upgrade program
-    let (program_id, authority_keypair) =
-        load_upgradeable_bpf_program(&bank_client, &mint_keypair, "solana_bpf_rust_upgradeable");
+    let buffer_keypair = Keypair::new();
+    let program_keypair = Keypair::new();
+    let program_id = program_keypair.pubkey();
+    let authority_keypair = Keypair::new();
+    load_upgradeable_bpf_program(
+        &bank_client,
+        &mint_keypair,
+        &buffer_keypair,
+        &program_keypair,
+        &authority_keypair,
+        "solana_bpf_rust_upgradeable",
+    );
 
     let mut instruction = Instruction::new(
         program_id,
@@ -1496,9 +1457,11 @@ fn test_program_bpf_upgrade() {
     );
 
     // Upgrade program
+    let buffer_keypair = Keypair::new();
     upgrade_bpf_program(
         &bank_client,
         &mint_keypair,
+        &buffer_keypair,
         &program_id,
         &authority_keypair,
         "solana_bpf_rust_upgraded",
@@ -1523,9 +1486,11 @@ fn test_program_bpf_upgrade() {
     );
 
     // Upgrade back to the original program
+    let buffer_keypair = Keypair::new();
     upgrade_bpf_program(
         &bank_client,
         &mint_keypair,
+        &buffer_keypair,
         &program_id,
         &new_authority_keypair,
         "solana_bpf_rust_upgradeable",
@@ -1537,6 +1502,93 @@ fn test_program_bpf_upgrade() {
     assert_eq!(
         result.unwrap_err().unwrap(),
         TransactionError::InstructionError(0, InstructionError::Custom(42))
+    );
+}
+
+#[cfg(feature = "bpf_rust")]
+#[test]
+fn test_program_bpf_upgrade_and_invoke_in_same_tx() {
+    solana_logger::setup();
+
+    let GenesisConfigInfo {
+        genesis_config,
+        mint_keypair,
+        ..
+    } = create_genesis_config(50);
+    let mut bank = Bank::new(&genesis_config);
+    let (name, id, entrypoint) = solana_bpf_loader_upgradeable_program!();
+    bank.add_builtin(&name, id, entrypoint);
+    let bank = Arc::new(bank);
+    let bank_client = BankClient::new_shared(&bank);
+
+    // Deploy upgrade program
+    let buffer_keypair = Keypair::new();
+    let program_keypair = Keypair::new();
+    let program_id = program_keypair.pubkey();
+    let authority_keypair = Keypair::new();
+    load_upgradeable_bpf_program(
+        &bank_client,
+        &mint_keypair,
+        &buffer_keypair,
+        &program_keypair,
+        &authority_keypair,
+        "noop",
+    );
+
+    let invoke_instruction = Instruction::new(
+        program_id,
+        &[0],
+        vec![
+            AccountMeta::new(program_id.clone(), false),
+            AccountMeta::new(clock::id(), false),
+            AccountMeta::new(fees::id(), false),
+        ],
+    );
+
+    // Call upgradeable program
+    let result =
+        bank_client.send_and_confirm_instruction(&mint_keypair, invoke_instruction.clone());
+    assert!(result.is_ok());
+
+    // Prepare for upgrade
+    let buffer_keypair = Keypair::new();
+    let path = create_bpf_path("panic");
+    let mut file = File::open(&path).unwrap_or_else(|err| {
+        panic!("Failed to open {}: {}", path.display(), err);
+    });
+    let mut elf = Vec::new();
+    file.read_to_end(&mut elf).unwrap();
+    load_buffer_account(
+        &bank_client,
+        &mint_keypair,
+        &buffer_keypair,
+        &authority_keypair,
+        &elf,
+    );
+
+    // Invoke, then upgrade the program, and then invoke again in same tx
+    let message = Message::new(
+        &[
+            invoke_instruction.clone(),
+            bpf_loader_upgradeable::upgrade(
+                &program_id,
+                &buffer_keypair.pubkey(),
+                &authority_keypair.pubkey(),
+                &mint_keypair.pubkey(),
+            ),
+            invoke_instruction,
+        ],
+        Some(&mint_keypair.pubkey()),
+    );
+    let tx = Transaction::new(
+        &[&mint_keypair, &authority_keypair],
+        message.clone(),
+        bank.last_blockhash(),
+    );
+    let (result, _) = process_transaction_and_record_inner(&bank, tx);
+    assert_eq!(
+        result.unwrap_err(),
+        TransactionError::InstructionError(2, InstructionError::ProgramFailedToComplete)
     );
 }
 
@@ -1564,8 +1616,18 @@ fn test_program_bpf_invoke_upgradeable_via_cpi() {
     );
 
     // Deploy upgradeable program
-    let (program_id, authority_keypair) =
-        load_upgradeable_bpf_program(&bank_client, &mint_keypair, "solana_bpf_rust_upgradeable");
+    let buffer_keypair = Keypair::new();
+    let program_keypair = Keypair::new();
+    let program_id = program_keypair.pubkey();
+    let authority_keypair = Keypair::new();
+    load_upgradeable_bpf_program(
+        &bank_client,
+        &mint_keypair,
+        &buffer_keypair,
+        &program_keypair,
+        &authority_keypair,
+        "solana_bpf_rust_upgradeable",
+    );
 
     let mut instruction = Instruction::new(
         invoke_and_return,
@@ -1587,9 +1649,11 @@ fn test_program_bpf_invoke_upgradeable_via_cpi() {
     );
 
     // Upgrade program
+    let buffer_keypair = Keypair::new();
     upgrade_bpf_program(
         &bank_client,
         &mint_keypair,
+        &buffer_keypair,
         &program_id,
         &authority_keypair,
         "solana_bpf_rust_upgraded",
@@ -1614,9 +1678,11 @@ fn test_program_bpf_invoke_upgradeable_via_cpi() {
     );
 
     // Upgrade back to the original program
+    let buffer_keypair = Keypair::new();
     upgrade_bpf_program(
         &bank_client,
         &mint_keypair,
+        &buffer_keypair,
         &program_id,
         &new_authority_keypair,
         "solana_bpf_rust_upgradeable",
@@ -1697,8 +1763,18 @@ fn test_program_bpf_upgrade_via_cpi() {
     );
 
     // Deploy upgradeable program
-    let (program_id, authority_keypair) =
-        load_upgradeable_bpf_program(&bank_client, &mint_keypair, "solana_bpf_rust_upgradeable");
+    let buffer_keypair = Keypair::new();
+    let program_keypair = Keypair::new();
+    let program_id = program_keypair.pubkey();
+    let authority_keypair = Keypair::new();
+    load_upgradeable_bpf_program(
+        &bank_client,
+        &mint_keypair,
+        &buffer_keypair,
+        &program_keypair,
+        &authority_keypair,
+        "solana_bpf_rust_upgradeable",
+    );
 
     let mut instruction = Instruction::new(
         invoke_and_return,
@@ -1726,12 +1802,19 @@ fn test_program_bpf_upgrade_via_cpi() {
     });
     let mut elf = Vec::new();
     file.read_to_end(&mut elf).unwrap();
-    let buffer_pubkey = load_buffer_account(&bank_client, &mint_keypair, &elf);
+    let buffer_keypair = Keypair::new();
+    load_buffer_account(
+        &bank_client,
+        &mint_keypair,
+        &buffer_keypair,
+        &authority_keypair,
+        &elf,
+    );
 
     // Upgrade program via CPI
     let mut upgrade_instruction = bpf_loader_upgradeable::upgrade(
         &program_id,
-        &buffer_pubkey,
+        &buffer_keypair.pubkey(),
         &authority_keypair.pubkey(),
         &mint_keypair.pubkey(),
     );
@@ -1751,4 +1834,236 @@ fn test_program_bpf_upgrade_via_cpi() {
         result.unwrap_err().unwrap(),
         TransactionError::InstructionError(0, InstructionError::Custom(43))
     );
+}
+
+#[cfg(feature = "bpf_rust")]
+#[test]
+fn test_program_bpf_upgrade_self_via_cpi() {
+    solana_logger::setup();
+
+    let GenesisConfigInfo {
+        genesis_config,
+        mint_keypair,
+        ..
+    } = create_genesis_config(50);
+    let mut bank = Bank::new(&genesis_config);
+    let (name, id, entrypoint) = solana_bpf_loader_program!();
+    bank.add_builtin(&name, id, entrypoint);
+    let (name, id, entrypoint) = solana_bpf_loader_upgradeable_program!();
+    bank.add_builtin(&name, id, entrypoint);
+    let bank = Arc::new(bank);
+    let bank_client = BankClient::new_shared(&bank);
+    let noop_program_id = load_bpf_program(&bank_client, &bpf_loader::id(), &mint_keypair, "noop");
+
+    // Deploy upgradeable program
+    let buffer_keypair = Keypair::new();
+    let program_keypair = Keypair::new();
+    let program_id = program_keypair.pubkey();
+    let authority_keypair = Keypair::new();
+    load_upgradeable_bpf_program(
+        &bank_client,
+        &mint_keypair,
+        &buffer_keypair,
+        &program_keypair,
+        &authority_keypair,
+        "solana_bpf_rust_invoke_and_return",
+    );
+
+    let mut invoke_instruction = Instruction::new(
+        program_id,
+        &[0],
+        vec![
+            AccountMeta::new(noop_program_id, false),
+            AccountMeta::new(noop_program_id, false),
+            AccountMeta::new(clock::id(), false),
+            AccountMeta::new(fees::id(), false),
+        ],
+    );
+
+    // Call the upgraded program
+    invoke_instruction.data[0] += 1;
+    let result =
+        bank_client.send_and_confirm_instruction(&mint_keypair, invoke_instruction.clone());
+    assert!(result.is_ok());
+
+    // Prepare for upgrade
+    let buffer_keypair = Keypair::new();
+    let path = create_bpf_path("panic");
+    let mut file = File::open(&path).unwrap_or_else(|err| {
+        panic!("Failed to open {}: {}", path.display(), err);
+    });
+    let mut elf = Vec::new();
+    file.read_to_end(&mut elf).unwrap();
+    load_buffer_account(
+        &bank_client,
+        &mint_keypair,
+        &buffer_keypair,
+        &authority_keypair,
+        &elf,
+    );
+
+    // Invoke, then upgrade the program, and then invoke again in same tx
+    let message = Message::new(
+        &[
+            invoke_instruction.clone(),
+            bpf_loader_upgradeable::upgrade(
+                &program_id,
+                &buffer_keypair.pubkey(),
+                &authority_keypair.pubkey(),
+                &mint_keypair.pubkey(),
+            ),
+            invoke_instruction,
+        ],
+        Some(&mint_keypair.pubkey()),
+    );
+    let tx = Transaction::new(
+        &[&mint_keypair, &authority_keypair],
+        message.clone(),
+        bank.last_blockhash(),
+    );
+    let (result, _) = process_transaction_and_record_inner(&bank, tx);
+    assert_eq!(
+        result.unwrap_err(),
+        TransactionError::InstructionError(2, InstructionError::ProgramFailedToComplete)
+    );
+}
+
+#[cfg(feature = "bpf_rust")]
+#[test]
+fn test_program_upgradeable_locks() {
+    fn setup_program_upgradeable_locks(
+        payer_keypair: &Keypair,
+        buffer_keypair: &Keypair,
+        program_keypair: &Keypair,
+    ) -> (Arc<Bank>, Transaction, Transaction) {
+        solana_logger::setup();
+
+        let GenesisConfigInfo {
+            genesis_config,
+            mint_keypair,
+            ..
+        } = create_genesis_config(2_000_000_000);
+        let mut bank = Bank::new(&genesis_config);
+        let (name, id, entrypoint) = solana_bpf_loader_upgradeable_program!();
+        bank.add_builtin(&name, id, entrypoint);
+        let bank = Arc::new(bank);
+        let bank_client = BankClient::new_shared(&bank);
+
+        load_upgradeable_bpf_program(
+            &bank_client,
+            &mint_keypair,
+            buffer_keypair,
+            program_keypair,
+            payer_keypair,
+            "solana_bpf_rust_panic",
+        );
+
+        // Load the buffer account
+        let path = create_bpf_path("solana_bpf_rust_noop");
+        let mut file = File::open(&path).unwrap_or_else(|err| {
+            panic!("Failed to open {}: {}", path.display(), err);
+        });
+        let mut elf = Vec::new();
+        file.read_to_end(&mut elf).unwrap();
+        load_buffer_account(
+            &bank_client,
+            &mint_keypair,
+            buffer_keypair,
+            &payer_keypair,
+            &elf,
+        );
+
+        bank_client
+            .send_and_confirm_instruction(
+                &mint_keypair,
+                system_instruction::transfer(
+                    &mint_keypair.pubkey(),
+                    &payer_keypair.pubkey(),
+                    1_000_000_000,
+                ),
+            )
+            .unwrap();
+
+        let invoke_tx = Transaction::new(
+            &[payer_keypair],
+            Message::new(
+                &[Instruction::new(
+                    program_keypair.pubkey(),
+                    &[0u8; 0],
+                    vec![],
+                )],
+                Some(&payer_keypair.pubkey()),
+            ),
+            bank.last_blockhash(),
+        );
+        let upgrade_tx = Transaction::new(
+            &[payer_keypair],
+            Message::new(
+                &[bpf_loader_upgradeable::upgrade(
+                    &program_keypair.pubkey(),
+                    &buffer_keypair.pubkey(),
+                    &payer_keypair.pubkey(),
+                    &payer_keypair.pubkey(),
+                )],
+                Some(&payer_keypair.pubkey()),
+            ),
+            bank.last_blockhash(),
+        );
+
+        (bank, invoke_tx, upgrade_tx)
+    }
+
+    let payer_keypair = keypair_from_seed(&[56u8; 32]).unwrap();
+    let buffer_keypair = keypair_from_seed(&[11; 32]).unwrap();
+    let program_keypair = keypair_from_seed(&[77u8; 32]).unwrap();
+
+    let results1 = {
+        let (bank, invoke_tx, upgrade_tx) =
+            setup_program_upgradeable_locks(&payer_keypair, &buffer_keypair, &program_keypair);
+        execute_transactions(&bank, &[upgrade_tx, invoke_tx])
+    };
+
+    let results2 = {
+        let (bank, invoke_tx, upgrade_tx) =
+            setup_program_upgradeable_locks(&payer_keypair, &buffer_keypair, &program_keypair);
+        execute_transactions(&bank, &[invoke_tx, upgrade_tx])
+    };
+
+    if false {
+        println!("upgrade and invoke");
+        for result in &results1 {
+            print_confirmed_tx("result", result.clone());
+        }
+        println!("invoke and upgrade");
+        for result in &results2 {
+            print_confirmed_tx("result", result.clone());
+        }
+    }
+
+    if let Some(ref meta) = results1[0].transaction.meta {
+        assert_eq!(meta.status, Ok(()));
+    } else {
+        panic!("no meta");
+    }
+    if let Some(ref meta) = results1[1].transaction.meta {
+        assert_eq!(meta.status, Err(TransactionError::AccountInUse));
+    } else {
+        panic!("no meta");
+    }
+    if let Some(ref meta) = results2[0].transaction.meta {
+        assert_eq!(
+            meta.status,
+            Err(TransactionError::InstructionError(
+                0,
+                InstructionError::ProgramFailedToComplete
+            ))
+        );
+    } else {
+        panic!("no meta");
+    }
+    if let Some(ref meta) = results2[1].transaction.meta {
+        assert_eq!(meta.status, Err(TransactionError::AccountInUse));
+    } else {
+        panic!("no meta");
+    }
 }

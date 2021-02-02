@@ -289,6 +289,7 @@ startBootstrapLeader() {
          \"$maybeWarpSlot\" \
          \"$waitForNodeInit\" \
          \"$extraPrimordialStakes\" \
+         \"$TMPFS_ACCOUNTS\" \
       "
 
   ) >> "$logFile" 2>&1 || {
@@ -360,6 +361,7 @@ startNode() {
          \"$maybeWarpSlot\" \
          \"$waitForNodeInit\" \
          \"$extraPrimordialStakes\" \
+         \"$TMPFS_ACCOUNTS\" \
       "
   ) >> "$logFile" 2>&1 &
   declare pid=$!
@@ -716,8 +718,7 @@ checkPremptibleInstances() {
   # immediately after its successfully pinged.
   for ipAddress in "${validatorIpList[@]}"; do
     (
-      set -x
-      timeout 5s ping -c 1 "$ipAddress" | tr - _
+      timeout 5s ping -c 1 "$ipAddress" | tr - _ &>/dev/null
     ) || {
       cat <<EOF
 

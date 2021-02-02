@@ -9,7 +9,6 @@ use serde_json::{self, Value};
 use solana_account_decoder::{UiAccount, UiAccountEncoding};
 use solana_clap_utils::{
     self,
-    commitment::commitment_arg_with_default,
     fee_payer::{fee_payer_arg, FEE_PAYER_ARG},
     input_parsers::*,
     input_validators::*,
@@ -51,7 +50,9 @@ use solana_stake_program::{
     stake_instruction::LockupArgs,
     stake_state::{Lockup, StakeAuthorize},
 };
-use solana_transaction_status::{EncodedTransaction, UiTransactionEncoding};
+use solana_transaction_status::{
+    EncodedTransaction, TransactionConfirmationStatus, UiTransactionEncoding,
+};
 use solana_vote_program::vote_state::VoteAuthorize;
 use std::{
     collections::HashMap,
@@ -121,6 +122,10 @@ pub enum CliCommand {
         timeout: Duration,
         blockhash: Option<Hash>,
         print_timestamp: bool,
+    },
+    Rent {
+        data_length: usize,
+        use_lamports_unit: bool,
     },
     ShowBlockProduction {
         epoch: Option<Epoch>,
@@ -255,6 +260,7 @@ pub enum CliCommand {
         nonce_account: Option<Pubkey>,
         nonce_authority: SignerIndex,
         fee_payer: SignerIndex,
+        custodian: Option<SignerIndex>,
     },
     StakeSetLockup {
         stake_account_pubkey: Pubkey,
@@ -431,6 +437,10 @@ impl CliConfig<'_> {
         solana_cli_config::Config::default().websocket_url
     }
 
+    fn default_commitment() -> CommitmentConfig {
+        CommitmentConfig::single_gossip()
+    }
+
     fn first_nonempty_setting(
         settings: std::vec::Vec<(SettingType, String)>,
     ) -> (SettingType, String) {
@@ -438,6 +448,16 @@ impl CliConfig<'_> {
             .into_iter()
             .find(|(_, value)| value != "")
             .expect("no nonempty setting")
+    }
+
+    fn first_setting_is_some<T>(
+        settings: std::vec::Vec<(SettingType, Option<T>)>,
+    ) -> (SettingType, T) {
+        let (setting_type, setting_option) = settings
+            .into_iter()
+            .find(|(_, value)| value.is_some())
+            .expect("all settings none");
+        (setting_type, setting_option.unwrap())
     }
 
     pub fn compute_websocket_url_setting(
@@ -484,6 +504,23 @@ impl CliConfig<'_> {
         ])
     }
 
+    pub fn compute_commitment_config(
+        commitment_cmd: &str,
+        commitment_cfg: &str,
+    ) -> (SettingType, CommitmentConfig) {
+        Self::first_setting_is_some(vec![
+            (
+                SettingType::Explicit,
+                CommitmentConfig::from_str(commitment_cmd).ok(),
+            ),
+            (
+                SettingType::Explicit,
+                CommitmentConfig::from_str(commitment_cfg).ok(),
+            ),
+            (SettingType::SystemDefault, Some(Self::default_commitment())),
+        ])
+    }
+
     pub(crate) fn pubkey(&self) -> Result<Pubkey, SignerError> {
         if !self.signers.is_empty() {
             self.signers[0].try_pubkey()
@@ -521,7 +558,7 @@ impl Default for CliConfig<'_> {
             rpc_timeout: Duration::from_secs(u64::from_str(DEFAULT_RPC_TIMEOUT_SECONDS).unwrap()),
             verbose: false,
             output_format: OutputFormat::Display,
-            commitment: CommitmentConfig::default(),
+            commitment: CommitmentConfig::single_gossip(),
             send_transaction_config: RpcSendTransactionConfig::default(),
             address_labels: HashMap::new(),
         }
@@ -831,6 +868,17 @@ pub fn parse_command(
                 signers: signer_info.signers,
             })
         }
+        ("rent", Some(matches)) => {
+            let data_length = value_of(matches, "data_length").unwrap();
+            let use_lamports_unit = matches.is_present("lamports");
+            Ok(CliCommandInfo {
+                command: CliCommand::Rent {
+                    data_length,
+                    use_lamports_unit,
+                },
+                signers: vec![],
+            })
+        }
         //
         ("", None) => {
             eprintln!("{}", matches.usage());
@@ -933,9 +981,7 @@ fn process_balance(
     } else {
         config.pubkey()?
     };
-    let balance = rpc_client
-        .get_balance_with_commitment(&pubkey, config.commitment)?
-        .value;
+    let balance = rpc_client.get_balance(&pubkey)?;
     Ok(build_balance_message(balance, use_lamports_unit, true))
 }
 
@@ -944,13 +990,9 @@ fn process_confirm(
     config: &CliConfig,
     signature: &Signature,
 ) -> ProcessResult {
-    match rpc_client.get_signature_status_with_commitment_and_history(
-        &signature,
-        CommitmentConfig::max(),
-        true,
-    ) {
+    match rpc_client.get_signature_statuses_with_history(&[*signature]) {
         Ok(status) => {
-            if let Some(transaction_status) = status {
+            if let Some(transaction_status) = &status.value[0] {
                 if config.verbose {
                     match rpc_client
                         .get_confirmed_transaction(signature, UiTransactionEncoding::Base64)
@@ -971,15 +1013,24 @@ fn process_confirm(
                             );
                         }
                         Err(err) => {
-                            println!("Unable to get confirmed transaction details: {}", err)
+                            if transaction_status.confirmation_status()
+                                != TransactionConfirmationStatus::Finalized
+                            {
+                                println!();
+                                println!("Unable to get finalized transaction details: not yet finalized")
+                            } else {
+                                println!();
+                                println!("Unable to get finalized transaction details: {}", err)
+                            }
                         }
                     }
                     println!();
                 }
 
-                match transaction_status {
-                    Ok(_) => Ok("Confirmed".to_string()),
-                    Err(err) => Ok(format!("Transaction failed: {}", err)),
+                if let Some(err) = &transaction_status.err {
+                    Ok(format!("Transaction failed: {}", err))
+                } else {
+                    Ok(format!("{:?}", transaction_status.confirmation_status()))
                 }
             } else {
                 Ok("Not found".to_string())
@@ -1019,7 +1070,9 @@ fn process_show_account(
 
     let mut account_string = config.output_format.formatted_string(&cli_account);
 
-    if config.output_format == OutputFormat::Display {
+    if config.output_format == OutputFormat::Display
+        || config.output_format == OutputFormat::DisplayVerbose
+    {
         if let Some(output_file) = output_file {
             let mut f = File::create(output_file)?;
             f.write_all(&data)?;
@@ -1100,29 +1153,33 @@ fn process_transfer(
         let result = if no_wait {
             rpc_client.send_transaction(&tx)
         } else {
-            rpc_client.send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                config.commitment,
-                config.send_transaction_config,
-            )
+            rpc_client.send_and_confirm_transaction_with_spinner(&tx)
         };
         log_instruction_custom_error::<SystemError>(result, &config)
     }
 }
 
 pub fn process_command(config: &CliConfig) -> ProcessResult {
-    if config.verbose && config.output_format == OutputFormat::Display {
+    if config.verbose && config.output_format == OutputFormat::DisplayVerbose {
         println_name_value("RPC URL:", &config.json_rpc_url);
         println_name_value("Default Signer Path:", &config.keypair_path);
         if config.keypair_path.starts_with("usb://") {
-            println_name_value("Pubkey:", &format!("{:?}", config.pubkey()?));
+            let pubkey = config
+                .pubkey()
+                .map(|pubkey| format!("{:?}", pubkey))
+                .unwrap_or_else(|_| "Unavailable".to_string());
+            println_name_value("Pubkey:", &pubkey);
         }
+        println_name_value("Commitment:", &config.commitment.commitment.to_string());
     }
 
     let mut _rpc_client;
     let rpc_client = if config.rpc_client.is_none() {
-        _rpc_client =
-            RpcClient::new_with_timeout(config.json_rpc_url.to_string(), config.rpc_timeout);
+        _rpc_client = RpcClient::new_with_timeout_and_commitment(
+            config.json_rpc_url.to_string(),
+            config.rpc_timeout,
+            config.commitment,
+        );
         &_rpc_client
     } else {
         // Primarily for testing
@@ -1133,7 +1190,6 @@ pub fn process_command(config: &CliConfig) -> ProcessResult {
         // Cluster Query Commands
         // Get address of this client
         CliCommand::Address => Ok(format!("{}", config.pubkey()?)),
-
         // Return software version of solana-cli and cluster entrypoint node
         CliCommand::Catchup {
             node_pubkey,
@@ -1198,6 +1254,10 @@ pub fn process_command(config: &CliConfig) -> ProcessResult {
             blockhash,
             *print_timestamp,
         ),
+        CliCommand::Rent {
+            data_length,
+            use_lamports_unit,
+        } => process_calculate_rent(&rpc_client, config, *data_length, *use_lamports_unit),
         CliCommand::ShowBlockProduction { epoch, slot_limit } => {
             process_show_block_production(&rpc_client, config, *epoch, *slot_limit)
         }
@@ -1459,11 +1519,13 @@ pub fn process_command(config: &CliConfig) -> ProcessResult {
             nonce_account,
             nonce_authority,
             fee_payer,
+            custodian,
         } => process_stake_authorize(
             &rpc_client,
             config,
             &stake_account_pubkey,
             new_authorizations,
+            *custodian,
             *sign_only,
             blockhash_query,
             *nonce_account,
@@ -1750,8 +1812,7 @@ pub fn request_and_confirm_airdrop(
         }
     }?;
     let tx = keypair.airdrop_transaction();
-    let result =
-        rpc_client.send_and_confirm_transaction_with_spinner_and_commitment(&tx, config.commitment);
+    let result = rpc_client.send_and_confirm_transaction_with_spinner(&tx);
     log_instruction_custom_error::<SystemError>(result, &config)
 }
 
@@ -1853,8 +1914,7 @@ pub fn app<'ab, 'v>(name: &str, about: &'ab str, version: &'v str) -> App<'ab, '
                         .long("lamports")
                         .takes_value(false)
                         .help("Display balance in lamports instead of SOL"),
-                )
-                .arg(commitment_arg_with_default("max")),
+                ),
         )
         .subcommand(
             SubCommand::with_name("confirm")
@@ -1951,8 +2011,7 @@ pub fn app<'ab, 'v>(name: &str, about: &'ab str, version: &'v str) -> App<'ab, '
                         .long("allow-excessive-deploy-account-balance")
                         .takes_value(false)
                         .help("Use the designated program id, even if the account already holds a large balance of SOL")
-                )
-                .arg(commitment_arg_with_default("max")),
+                ),
         )
         .subcommand(
             SubCommand::with_name("pay")
@@ -2405,7 +2464,10 @@ mod tests {
 
         let good_signature = Signature::new(&bs58::decode(SIGNATURE).into_vec().unwrap());
         config.command = CliCommand::Confirm(good_signature);
-        assert_eq!(process_command(&config).unwrap(), "Confirmed");
+        assert_eq!(
+            process_command(&config).unwrap(),
+            format!("{:?}", TransactionConfirmationStatus::Finalized)
+        );
 
         let bob_keypair = Keypair::new();
         let bob_pubkey = bob_keypair.pubkey();
@@ -2663,7 +2725,7 @@ mod tests {
         let program_id = json
             .as_object()
             .unwrap()
-            .get("ProgramId")
+            .get("programId")
             .unwrap()
             .as_str()
             .unwrap();

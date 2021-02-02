@@ -54,6 +54,7 @@ use solana_sdk::{
     epoch_schedule::EpochSchedule,
     hash::Hash,
     pubkey::Pubkey,
+    sanitize::Sanitize,
     signature::Signature,
     stake_history::StakeHistory,
     system_instruction,
@@ -62,7 +63,8 @@ use solana_sdk::{
 };
 use solana_stake_program::stake_state::StakeState;
 use solana_transaction_status::{
-    EncodedConfirmedBlock, EncodedConfirmedTransaction, TransactionStatus, UiTransactionEncoding,
+    EncodedConfirmedBlock, EncodedConfirmedTransaction, TransactionConfirmationStatus,
+    TransactionStatus, UiTransactionEncoding,
 };
 use solana_vote_program::vote_state::{VoteState, MAX_LOCKOUT_HISTORY};
 use spl_token_v2_0::{
@@ -79,6 +81,7 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc, Mutex, RwLock,
     },
+    time::Duration,
 };
 use tokio::runtime;
 
@@ -112,6 +115,8 @@ pub struct JsonRpcConfig {
     pub enable_bigtable_ledger_upload: bool,
     pub max_multiple_accounts: Option<usize>,
     pub account_indexes: HashSet<AccountIndex>,
+    pub rpc_threads: usize,
+    pub rpc_bigtable_timeout: Option<Duration>,
 }
 
 #[derive(Clone)]
@@ -660,6 +665,22 @@ impl JsonRpcRequestProcessor {
         Ok(())
     }
 
+    fn check_bigtable_result<T>(
+        &self,
+        result: &std::result::Result<T, solana_storage_bigtable::Error>,
+    ) -> Result<()>
+    where
+        T: std::fmt::Debug,
+    {
+        if result.is_err() {
+            let err = result.as_ref().unwrap_err();
+            if let solana_storage_bigtable::Error::BlockNotFound(slot) = err {
+                return Err(RpcCustomError::LongTermStorageSlotSkipped { slot: *slot }.into());
+            }
+        }
+        Ok(())
+    }
+
     pub fn get_confirmed_block(
         &self,
         slot: Slot,
@@ -678,9 +699,11 @@ impl JsonRpcRequestProcessor {
             self.check_blockstore_root(&result, slot)?;
             if result.is_err() {
                 if let Some(bigtable_ledger_storage) = &self.bigtable_ledger_storage {
-                    return Ok(self
+                    let bigtable_result = self
                         .runtime_handle
-                        .block_on(bigtable_ledger_storage.get_confirmed_block(slot))
+                        .block_on(bigtable_ledger_storage.get_confirmed_block(slot));
+                    self.check_bigtable_result(&bigtable_result)?;
+                    return Ok(bigtable_result
                         .ok()
                         .map(|confirmed_block| confirmed_block.encode(encoding)));
                 }
@@ -725,9 +748,18 @@ impl JsonRpcRequestProcessor {
                     .runtime_handle
                     .block_on(
                         bigtable_ledger_storage
-                            .get_confirmed_blocks(start_slot, (end_slot - start_slot) as usize),
+                            .get_confirmed_blocks(start_slot, (end_slot - start_slot) as usize + 1), // increment limit by 1 to ensure returned range is inclusive of both start_slot and end_slot
                     )
-                    .unwrap_or_else(|_| vec![]));
+                    .map(|mut bigtable_blocks| {
+                        bigtable_blocks.retain(|&slot| slot <= end_slot);
+                        bigtable_blocks
+                    })
+                    .map_err(|_| {
+                        Error::invalid_params(
+                            "BigTable query failed (maybe timeout due to too large range?)"
+                                .to_string(),
+                        )
+                    })?);
             }
         }
 
@@ -784,9 +816,11 @@ impl JsonRpcRequestProcessor {
             self.check_blockstore_root(&result, slot)?;
             if result.is_err() || matches!(result, Ok(None)) {
                 if let Some(bigtable_ledger_storage) = &self.bigtable_ledger_storage {
-                    return Ok(self
+                    let bigtable_result = self
                         .runtime_handle
-                        .block_on(bigtable_ledger_storage.get_confirmed_block(slot))
+                        .block_on(bigtable_ledger_storage.get_confirmed_block(slot));
+                    self.check_bigtable_result(&bigtable_result)?;
+                    return Ok(bigtable_result
                         .ok()
                         .and_then(|confirmed_block| confirmed_block.block_time));
                 }
@@ -857,6 +891,7 @@ impl JsonRpcRequestProcessor {
                             status: status_meta.status,
                             confirmations: None,
                             err,
+                            confirmation_status: Some(TransactionConfirmationStatus::Finalized),
                         }
                     })
                     .or_else(|| {
@@ -885,6 +920,10 @@ impl JsonRpcRequestProcessor {
         let (slot, status) = bank.get_signature_status_slot(&signature)?;
         let r_block_commitment_cache = self.block_commitment_cache.read().unwrap();
 
+        let optimistically_confirmed_bank = self.bank(Some(CommitmentConfig::single_gossip()));
+        let optimistically_confirmed =
+            optimistically_confirmed_bank.get_signature_status_slot(&signature);
+
         let confirmations = if r_block_commitment_cache.root() >= slot
             && is_confirmed_rooted(&r_block_commitment_cache, bank, &self.blockstore, slot)
         {
@@ -900,6 +939,13 @@ impl JsonRpcRequestProcessor {
             status,
             confirmations,
             err,
+            confirmation_status: if confirmations.is_none() {
+                Some(TransactionConfirmationStatus::Finalized)
+            } else if optimistically_confirmed.is_some() {
+                Some(TransactionConfirmationStatus::Confirmed)
+            } else {
+                Some(TransactionConfirmationStatus::Processed)
+            },
         })
     }
 
@@ -2843,6 +2889,16 @@ fn deserialize_transaction(
             info!("transaction deserialize error: {:?}", err);
             Error::invalid_params(&err.to_string())
         })
+        .and_then(|transaction: Transaction| {
+            if let Err(err) = transaction.sanitize() {
+                Err(Error::invalid_params(format!(
+                    "invalid transaction: {}",
+                    err
+                )))
+            } else {
+                Ok(transaction)
+            }
+        })
         .map(|transaction| (wire_transaction, transaction))
 }
 
@@ -4488,7 +4544,7 @@ pub mod tests {
         assert_eq!(
             res,
             Some(
-                r#"{"jsonrpc":"2.0","error":{"code":-32002,"message":"Transaction simulation failed: Transaction failed to sanitize accounts offsets correctly","data":{"err":"SanitizeFailure","logs":[]}},"id":1}"#.to_string(),
+                r#"{"jsonrpc":"2.0","error":{"code":-32602,"message":"invalid transaction: index out of bounds"},"id":1}"#.to_string(),
             )
         );
         let mut bad_transaction = system_transaction::transfer(
@@ -4542,18 +4598,17 @@ pub mod tests {
             )
         );
 
-        // sendTransaction will fail due to no signer. Skip preflight so signature verification
-        // doesn't catch it
+        // sendTransaction will fail due to sanitization failure
         bad_transaction.signatures.clear();
         let req = format!(
-            r#"{{"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":["{}", {{"skipPreflight": true}}]}}"#,
+            r#"{{"jsonrpc":"2.0","id":1,"method":"sendTransaction","params":["{}"]}}"#,
             bs58::encode(serialize(&bad_transaction).unwrap()).into_string()
         );
         let res = io.handle_request_sync(&req, meta);
         assert_eq!(
             res,
             Some(
-                r#"{"jsonrpc":"2.0","error":{"code":-32003,"message":"Transaction signature verification failure"},"id":1}"#.to_string(),
+                r#"{"jsonrpc":"2.0","error":{"code":-32602,"message":"invalid transaction: index out of bounds"},"id":1}"#.to_string(),
             )
         );
     }
@@ -6074,7 +6129,7 @@ pub mod tests {
     }
 
     #[test]
-    fn test_deserialize_transacion_too_large_payloads_fail() {
+    fn test_deserialize_transaction_too_large_payloads_fail() {
         // +2 because +1 still fits in base64 encoded worst-case
         let too_big = PACKET_DATA_SIZE + 2;
         let tx_ser = vec![0xffu8; too_big];
@@ -6113,6 +6168,22 @@ pub mod tests {
         assert_eq!(
             deserialize_transaction(tx64, UiTransactionEncoding::Base64).unwrap_err(),
             expect
+        );
+    }
+
+    #[test]
+    fn test_deserialize_transaction_unsanitary() {
+        let unsanitary_tx58 = "ju9xZWuDBX4pRxX2oZkTjxU5jB4SSTgEGhX8bQ8PURNzyzqKMPPpNvWihx8zUe\
+             FfrbVNoAaEsNKZvGzAnTDy5bhNT9kt6KFCTBixpvrLCzg4M5UdFUQYrn1gdgjX\
+             pLHxcaShD81xBNaFDgnA2nkkdHnKtZt4hVSfKAmw3VRZbjrZ7L2fKZBx21CwsG\
+             hD6onjM2M3qZW5C8J6d1pj41MxKmZgPBSha3MyKkNLkAGFASK"
+            .to_string();
+
+        let expect58 =
+            Error::invalid_params("invalid transaction: index out of bounds".to_string());
+        assert_eq!(
+            deserialize_transaction(unsanitary_tx58, UiTransactionEncoding::Base58).unwrap_err(),
+            expect58
         );
     }
 }

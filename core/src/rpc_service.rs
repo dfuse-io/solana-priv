@@ -273,6 +273,7 @@ impl JsonRpcService {
     ) -> Self {
         info!("rpc bound to {:?}", rpc_addr);
         info!("rpc configuration: {:?}", config);
+        let rpc_threads = 1.max(config.rpc_threads);
 
         let health = Arc::new(RpcHealth::new(
             cluster_info.clone(),
@@ -296,6 +297,7 @@ impl JsonRpcService {
                 runtime
                     .block_on(solana_storage_bigtable::LedgerStorage::new(
                         !config.enable_bigtable_ledger_upload,
+                        config.rpc_bigtable_timeout,
                     ))
                     .map(|bigtable_ledger_storage| {
                         info!("BigTable ledger storage initialized");
@@ -356,6 +358,20 @@ impl JsonRpcService {
 
         let ledger_path = ledger_path.to_path_buf();
 
+        // sadly, some parts of our current rpc implemention block the jsonrpc's
+        // _socket-listening_ event loop for too long, due to (blocking) long IO or intesive CPU,
+        // causing no further processing of incoming requests and ultimatily innocent clients timing-out.
+        // So create a (shared) multi-threaded event_loop for jsonrpc and set its .threads() to 1,
+        // so that we avoid the single-threaded event loops from being created automatically by
+        // jsonrpc for threads when .threads(N > 1) is given.
+        let event_loop = {
+            tokio_01::runtime::Builder::new()
+                .core_threads(rpc_threads)
+                .name_prefix("sol-rpc-el")
+                .build()
+                .unwrap()
+        };
+
         let (close_handle_sender, close_handle_receiver) = channel();
         let thread_hdl = Builder::new()
             .name("solana-jsonrpc".to_string())
@@ -374,7 +390,8 @@ impl JsonRpcService {
                     io,
                     move |_req: &hyper::Request<hyper::Body>| request_processor.clone(),
                 )
-                .threads(num_cpus::get())
+                .event_loop_executor(event_loop.executor())
+                .threads(1)
                 .cors(DomainsValidation::AllowOnly(vec![
                     AccessControlAllowOrigin::Any,
                 ]))

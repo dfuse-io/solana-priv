@@ -6,8 +6,8 @@ use crate::{
 use chrono::{Local, TimeZone};
 use clap::{value_t, value_t_or_exit, App, AppSettings, Arg, ArgMatches, SubCommand};
 use console::{style, Emoji};
+use serde::{Deserialize, Serialize};
 use solana_clap_utils::{
-    commitment::{commitment_arg, commitment_arg_with_default},
     input_parsers::*,
     input_validators::*,
     keypair::DefaultSigner,
@@ -15,7 +15,8 @@ use solana_clap_utils::{
 };
 use solana_cli_output::{
     display::{
-        format_labeled_address, new_spinner_progress_bar, println_name_value, println_transaction,
+        build_balance_message, format_labeled_address, new_spinner_progress_bar,
+        println_name_value, println_transaction, writeln_name_value,
     },
     *,
 };
@@ -41,6 +42,7 @@ use solana_sdk::{
     message::Message,
     native_token::lamports_to_sol,
     pubkey::{self, Pubkey},
+    rent::Rent,
     rpc_port::DEFAULT_RPC_PORT_STR,
     signature::Signature,
     system_instruction, system_program,
@@ -48,11 +50,13 @@ use solana_sdk::{
         self,
         stake_history::{self},
     },
+    timing,
     transaction::Transaction,
 };
 use solana_transaction_status::UiTransactionEncoding;
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
+    fmt,
     net::SocketAddr,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -121,18 +125,18 @@ impl ClusterQuerySubCommands for App<'_, '_> {
                         .long("log")
                         .takes_value(false)
                         .help("Don't update the progress inplace; instead show updates with its own new lines"),
-                )
-                .arg(commitment_arg()),
+                ),
         )
         .subcommand(
             SubCommand::with_name("cluster-date")
-                .about("Get current cluster date, computed from genesis creation time and network time")
+                .about("Get current cluster date, computed from genesis creation time and network time"),
         )
         .subcommand(
             SubCommand::with_name("cluster-version")
                 .about("Get the version of the cluster entrypoint"),
         )
-        .subcommand(SubCommand::with_name("fees").about("Display current cluster fees"))
+        .subcommand(SubCommand::with_name("fees").about("Display current cluster fees"),
+        )
         .subcommand(
             SubCommand::with_name("first-available-block")
                 .about("Get the first available block in the storage"),
@@ -162,8 +166,7 @@ impl ClusterQuerySubCommands for App<'_, '_> {
         .subcommand(
             SubCommand::with_name("epoch-info")
             .about("Get information about the current epoch")
-            .alias("get-epoch-info")
-            .arg(commitment_arg()),
+            .alias("get-epoch-info"),
         )
         .subcommand(
             SubCommand::with_name("genesis-hash")
@@ -172,16 +175,13 @@ impl ClusterQuerySubCommands for App<'_, '_> {
         )
         .subcommand(
             SubCommand::with_name("slot").about("Get current slot")
-            .alias("get-slot")
-            .arg(commitment_arg()),
+            .alias("get-slot"),
         )
         .subcommand(
-            SubCommand::with_name("block-height").about("Get current block height")
-            .arg(commitment_arg()),
+            SubCommand::with_name("block-height").about("Get current block height"),
         )
         .subcommand(
-            SubCommand::with_name("epoch").about("Get current epoch")
-            .arg(commitment_arg()),
+            SubCommand::with_name("epoch").about("Get current epoch"),
         )
         .subcommand(
             SubCommand::with_name("largest-accounts").about("Get addresses of largest cluster accounts")
@@ -197,8 +197,7 @@ impl ClusterQuerySubCommands for App<'_, '_> {
                     .takes_value(false)
                     .conflicts_with("circulating")
                     .help("Filter address list to only non-circulating accounts")
-            )
-            .arg(commitment_arg()),
+            ),
         )
         .subcommand(
             SubCommand::with_name("supply").about("Get information about the cluster supply of SOL")
@@ -207,18 +206,15 @@ impl ClusterQuerySubCommands for App<'_, '_> {
                     .long("print-accounts")
                     .takes_value(false)
                     .help("Print list of non-circualting account addresses")
-            )
-            .arg(commitment_arg()),
+            ),
         )
         .subcommand(
             SubCommand::with_name("total-supply").about("Get total number of SOL")
-            .setting(AppSettings::Hidden)
-            .arg(commitment_arg()),
+            .setting(AppSettings::Hidden),
         )
         .subcommand(
             SubCommand::with_name("transaction-count").about("Get current transaction count")
-            .alias("get-transaction-count")
-            .arg(commitment_arg()),
+            .alias("get-transaction-count"),
         )
         .subcommand(
             SubCommand::with_name("ping")
@@ -265,8 +261,7 @@ impl ClusterQuerySubCommands for App<'_, '_> {
                         .default_value("15")
                         .help("Wait up to timeout seconds for transaction confirmation"),
                 )
-                .arg(blockhash_arg())
-                .arg(commitment_arg()),
+                .arg(blockhash_arg()),
         )
         .subcommand(
             SubCommand::with_name("live-slots")
@@ -289,8 +284,7 @@ impl ClusterQuerySubCommands for App<'_, '_> {
                         .takes_value(false)
                         .conflicts_with("address")
                         .help("Include vote transactions when monitoring all transactions")
-                )
-                .arg(commitment_arg_with_default("singleGossip")),
+                ),
         )
         .subcommand(
             SubCommand::with_name("block-production")
@@ -340,8 +334,7 @@ impl ClusterQuerySubCommands for App<'_, '_> {
                         .long("lamports")
                         .takes_value(false)
                         .help("Display balance in lamports instead of SOL"),
-                )
-                .arg(commitment_arg()),
+                ),
         )
         .subcommand(
             SubCommand::with_name("transaction-history")
@@ -386,6 +379,23 @@ impl ClusterQuerySubCommands for App<'_, '_> {
                         .value_name("PERCENT")
                         .takes_value(true)
                         .index(1),
+                ),
+        )
+        .subcommand(
+            SubCommand::with_name("rent")
+                .about("Calculate per-epoch and rent-exempt-minimum values for a given account data length.")
+                .arg(
+                    Arg::with_name("data_length")
+                        .index(1)
+                        .value_name("DATA_LENGTH")
+                        .required(true)
+                        .help("Length of data in the account to calculate rent for"),
+                )
+                .arg(
+                    Arg::with_name("lamports")
+                        .long("lamports")
+                        .takes_value(false)
+                        .help("Display rent in lamports instead of SOL"),
                 ),
         )
     }
@@ -786,8 +796,7 @@ pub fn process_catchup(
 }
 
 pub fn process_cluster_date(rpc_client: &RpcClient, config: &CliConfig) -> ProcessResult {
-    let result = rpc_client
-        .get_account_with_commitment(&sysvar::clock::id(), CommitmentConfig::default())?;
+    let result = rpc_client.get_account_with_commitment(&sysvar::clock::id(), config.commitment)?;
     if let Some(clock_account) = result.value {
         let clock: Clock = from_account(&clock_account).ok_or_else(|| {
             CliError::RpcRequestError("Failed to deserialize clock sysvar".to_string())
@@ -813,7 +822,7 @@ pub fn process_cluster_version(rpc_client: &RpcClient, config: &CliConfig) -> Pr
 }
 
 pub fn process_fees(rpc_client: &RpcClient, config: &CliConfig) -> ProcessResult {
-    let result = rpc_client.get_recent_blockhash_with_commitment(CommitmentConfig::default())?;
+    let result = rpc_client.get_recent_blockhash_with_commitment(config.commitment)?;
     let (recent_blockhash, fee_calculator, last_valid_slot) = result.value;
     let fees = CliFees {
         slot: result.context.slot,
@@ -893,7 +902,7 @@ pub fn process_get_block(
     let slot = if let Some(slot) = slot {
         slot
     } else {
-        rpc_client.get_slot()?
+        rpc_client.get_slot_with_commitment(CommitmentConfig::max())?
     };
 
     let mut block =
@@ -971,22 +980,20 @@ pub fn process_get_block_time(
     let slot = if let Some(slot) = slot {
         slot
     } else {
-        rpc_client.get_slot()?
+        rpc_client.get_slot_with_commitment(CommitmentConfig::max())?
     };
     let timestamp = rpc_client.get_block_time(slot)?;
     let block_time = CliBlockTime { slot, timestamp };
     Ok(config.output_format.formatted_string(&block_time))
 }
 
-pub fn process_get_epoch(rpc_client: &RpcClient, config: &CliConfig) -> ProcessResult {
-    let epoch_info = rpc_client.get_epoch_info_with_commitment(config.commitment)?;
+pub fn process_get_epoch(rpc_client: &RpcClient, _config: &CliConfig) -> ProcessResult {
+    let epoch_info = rpc_client.get_epoch_info()?;
     Ok(epoch_info.epoch.to_string())
 }
 
 pub fn process_get_epoch_info(rpc_client: &RpcClient, config: &CliConfig) -> ProcessResult {
-    let epoch_info: CliEpochInfo = rpc_client
-        .get_epoch_info_with_commitment(config.commitment)?
-        .into();
+    let epoch_info: CliEpochInfo = rpc_client.get_epoch_info()?.into();
     Ok(config.output_format.formatted_string(&epoch_info))
 }
 
@@ -995,15 +1002,13 @@ pub fn process_get_genesis_hash(rpc_client: &RpcClient) -> ProcessResult {
     Ok(genesis_hash.to_string())
 }
 
-pub fn process_get_slot(rpc_client: &RpcClient, config: &CliConfig) -> ProcessResult {
-    let slot = rpc_client.get_slot_with_commitment(config.commitment)?;
+pub fn process_get_slot(rpc_client: &RpcClient, _config: &CliConfig) -> ProcessResult {
+    let slot = rpc_client.get_slot()?;
     Ok(slot.to_string())
 }
 
-pub fn process_get_block_height(rpc_client: &RpcClient, config: &CliConfig) -> ProcessResult {
-    let epoch_info: CliEpochInfo = rpc_client
-        .get_epoch_info_with_commitment(config.commitment)?
-        .into();
+pub fn process_get_block_height(rpc_client: &RpcClient, _config: &CliConfig) -> ProcessResult {
+    let epoch_info: CliEpochInfo = rpc_client.get_epoch_info()?.into();
     Ok(epoch_info.epoch_info.block_height.to_string())
 }
 
@@ -1189,19 +1194,19 @@ pub fn process_supply(
     config: &CliConfig,
     print_accounts: bool,
 ) -> ProcessResult {
-    let supply_response = rpc_client.supply_with_commitment(config.commitment)?;
+    let supply_response = rpc_client.supply()?;
     let mut supply: CliSupply = supply_response.value.into();
     supply.print_accounts = print_accounts;
     Ok(config.output_format.formatted_string(&supply))
 }
 
-pub fn process_total_supply(rpc_client: &RpcClient, config: &CliConfig) -> ProcessResult {
-    let total_supply = rpc_client.total_supply_with_commitment(config.commitment)?;
+pub fn process_total_supply(rpc_client: &RpcClient, _config: &CliConfig) -> ProcessResult {
+    let total_supply = rpc_client.total_supply()?;
     Ok(format!("{} SOL", lamports_to_sol(total_supply)))
 }
 
-pub fn process_get_transaction_count(rpc_client: &RpcClient, config: &CliConfig) -> ProcessResult {
-    let transaction_count = rpc_client.get_transaction_count_with_commitment(config.commitment)?;
+pub fn process_get_transaction_count(rpc_client: &RpcClient, _config: &CliConfig) -> ProcessResult {
+    let transaction_count = rpc_client.get_transaction_count()?;
     Ok(transaction_count.to_string())
 }
 
@@ -1292,8 +1297,7 @@ pub fn process_ping(
             Ok(signature) => {
                 let transaction_sent = Instant::now();
                 loop {
-                    let signature_status = rpc_client
-                        .get_signature_status_with_commitment(&signature, config.commitment)?;
+                    let signature_status = rpc_client.get_signature_status(&signature)?;
                     let elapsed_time = Instant::now().duration_since(transaction_sent);
                     if let Some(transaction_status) = signature_status {
                         match transaction_status {
@@ -1697,8 +1701,8 @@ pub fn process_show_validators(
     config: &CliConfig,
     use_lamports_unit: bool,
 ) -> ProcessResult {
-    let epoch_info = rpc_client.get_epoch_info_with_commitment(config.commitment)?;
-    let vote_accounts = rpc_client.get_vote_accounts_with_commitment(config.commitment)?;
+    let epoch_info = rpc_client.get_epoch_info()?;
+    let vote_accounts = rpc_client.get_vote_accounts()?;
 
     let mut node_version = HashMap::new();
     let unknown_version = "unknown".to_string();
@@ -1847,6 +1851,62 @@ pub fn process_transaction_history(
     Ok(transactions_found)
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CliRentCalculation {
+    pub lamports_per_byte_year: u64,
+    pub lamports_per_epoch: u64,
+    pub rent_exempt_minimum_lamports: u64,
+    #[serde(skip)]
+    pub use_lamports_unit: bool,
+}
+
+impl CliRentCalculation {
+    fn build_balance_message(&self, lamports: u64) -> String {
+        build_balance_message(lamports, self.use_lamports_unit, true)
+    }
+}
+
+impl fmt::Display for CliRentCalculation {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let per_byte_year = self.build_balance_message(self.lamports_per_byte_year);
+        let per_epoch = self.build_balance_message(self.lamports_per_epoch);
+        let exempt_minimum = self.build_balance_message(self.rent_exempt_minimum_lamports);
+        writeln_name_value(f, "Rent per byte-year:", &per_byte_year)?;
+        writeln_name_value(f, "Rent per epoch:", &per_epoch)?;
+        writeln_name_value(f, "Rent-exempt minimum:", &exempt_minimum)
+    }
+}
+
+impl QuietDisplay for CliRentCalculation {}
+impl VerboseDisplay for CliRentCalculation {}
+
+pub fn process_calculate_rent(
+    rpc_client: &RpcClient,
+    config: &CliConfig,
+    data_length: usize,
+    use_lamports_unit: bool,
+) -> ProcessResult {
+    let epoch_schedule = rpc_client.get_epoch_schedule()?;
+    let rent_account = rpc_client.get_account(&sysvar::rent::id())?;
+    let rent: Rent = rent_account.deserialize_data()?;
+    let rent_exempt_minimum_lamports = rent.minimum_balance(data_length);
+    let seconds_per_tick = Duration::from_secs_f64(1.0 / clock::DEFAULT_TICKS_PER_SECOND as f64);
+    let slots_per_year =
+        timing::years_as_slots(1.0, &seconds_per_tick, clock::DEFAULT_TICKS_PER_SLOT);
+    let slots_per_epoch = epoch_schedule.slots_per_epoch as f64;
+    let years_per_epoch = slots_per_epoch / slots_per_year;
+    let (lamports_per_epoch, _) = rent.due(0, data_length, years_per_epoch);
+    let cli_rent_calculation = CliRentCalculation {
+        lamports_per_byte_year: rent.lamports_per_byte_year,
+        lamports_per_epoch,
+        rent_exempt_minimum_lamports,
+        use_lamports_unit,
+    };
+
+    Ok(config.output_format.formatted_string(&cli_rent_calculation))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1989,8 +2049,6 @@ mod tests {
             "-t",
             "3",
             "-D",
-            "--commitment",
-            "max",
             "--blockhash",
             "4CCNp28j6AhGq7PkjPDP4wbQWBS8LLbQin2xV5n8frKX",
         ]);

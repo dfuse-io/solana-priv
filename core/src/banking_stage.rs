@@ -23,7 +23,10 @@ use solana_perf::{
 };
 use solana_runtime::{
     accounts_db::ErrorCounters,
-    bank::{Bank, TransactionBalancesSet, TransactionCheckResult, TransactionExecutionResult},
+    bank::{
+        Bank, ExecuteTimings, TransactionBalancesSet, TransactionCheckResult,
+        TransactionExecutionResult,
+    },
     bank_utils,
     transaction_batch::TransactionBatch,
     vote_sender_types::ReplayVoteSender,
@@ -39,8 +42,13 @@ use solana_sdk::{
     transaction::{self, Transaction, TransactionError},
     deepmind::deepmind_enabled,
 };
+use solana_transaction_status::token_balances::{
+    collect_token_balances, TransactionTokenBalancesSet,
+};
 use std::{
-    cmp, env,
+    cmp,
+    collections::HashMap,
+    env,
     net::UdpSocket,
     sync::atomic::AtomicBool,
     sync::mpsc::Receiver,
@@ -531,6 +539,15 @@ impl BankingStage {
         } else {
             vec![]
         };
+
+        let mut execute_timings = ExecuteTimings::default();
+        let mut mint_decimals: HashMap<Pubkey, u8> = HashMap::new();
+
+        let pre_token_balances = if transaction_status_sender.is_some() {
+            collect_token_balances(&bank, &batch, &mut mint_decimals)
+        } else {
+            vec![]
+        };
         if deepmind_enabled() {
             println!("DMLOG HALT tpu code path. only consider tvu codepath");
         }
@@ -547,6 +564,7 @@ impl BankingStage {
             MAX_PROCESSING_AGE,
             transaction_status_sender.is_some(),
             transaction_status_sender.is_some(),
+            &mut execute_timings,
             &None,
         );
         load_execute_time.stop();
@@ -574,17 +592,20 @@ impl BankingStage {
                 &results,
                 tx_count,
                 signature_count,
+                &mut execute_timings,
             );
 
             bank_utils::find_and_send_votes(txs, &tx_results, Some(gossip_vote_sender));
             if let Some(sender) = transaction_status_sender {
                 let post_balances = bank.collect_balances(batch);
+                let post_token_balances = collect_token_balances(&bank, &batch, &mut mint_decimals);
                 send_transaction_status_batch(
                     bank.clone(),
                     batch.transactions(),
                     batch.iteration_order_vec(),
                     tx_results.execution_results,
                     TransactionBalancesSet::new(pre_balances, post_balances),
+                    TransactionTokenBalancesSet::new(pre_token_balances, post_token_balances),
                     inner_instructions,
                     transaction_logs,
                     sender,

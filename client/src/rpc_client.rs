@@ -40,6 +40,7 @@ use solana_transaction_status::{
 };
 use solana_vote_program::vote_state::MAX_LOCKOUT_HISTORY;
 use std::{
+    cmp::min,
     net::SocketAddr,
     sync::RwLock,
     thread::sleep,
@@ -99,6 +100,17 @@ impl RpcClient {
         )
     }
 
+    pub fn new_with_timeout_and_commitment(
+        url: String,
+        timeout: Duration,
+        commitment_config: CommitmentConfig,
+    ) -> Self {
+        Self::new_sender(
+            HttpSender::new_with_timeout(url, timeout),
+            commitment_config,
+        )
+    }
+
     pub fn new_mock(url: String) -> Self {
         Self::new_sender(MockSender::new(url), CommitmentConfig::default())
     }
@@ -112,6 +124,13 @@ impl RpcClient {
 
     pub fn new_socket(addr: SocketAddr) -> Self {
         Self::new(get_rpc_request_str(addr, false))
+    }
+
+    pub fn new_socket_with_commitment(
+        addr: SocketAddr,
+        commitment_config: CommitmentConfig,
+    ) -> Self {
+        Self::new_with_commitment(get_rpc_request_str(addr, false), commitment_config)
     }
 
     pub fn new_socket_with_timeout(addr: SocketAddr, timeout: Duration) -> Self {
@@ -346,6 +365,10 @@ impl RpcClient {
         commitment_config: CommitmentConfig,
     ) -> ClientResult<Slot> {
         self.send(RpcRequest::GetSlot, json!([commitment_config]))
+    }
+
+    pub fn supply(&self) -> RpcResult<RpcSupply> {
+        self.supply_with_commitment(self.commitment_config)
     }
 
     pub fn supply_with_commitment(
@@ -769,6 +792,7 @@ impl RpcClient {
                 filters: None,
                 account_config: RpcAccountInfoConfig {
                     encoding: Some(UiAccountEncoding::Base64),
+                    commitment: Some(self.commitment_config),
                     ..RpcAccountInfoConfig::default()
                 },
             },
@@ -1364,29 +1388,20 @@ impl RpcClient {
         }
         let now = Instant::now();
         loop {
-            match commitment.commitment {
-                CommitmentLevel::Max | CommitmentLevel::Root =>
-                // Return when default (max) commitment is reached
-                // Failed transactions have already been eliminated, `is_some` check is sufficient
-                {
-                    if self.get_signature_status(&signature)?.is_some() {
-                        progress_bar.set_message("Transaction confirmed");
-                        progress_bar.finish_and_clear();
-                        return Ok(signature);
-                    }
-                }
-                _ => {
-                    // Return when one confirmation has been reached
-                    if confirmations >= desired_confirmations {
-                        progress_bar.set_message("Transaction reached commitment");
-                        progress_bar.finish_and_clear();
-                        return Ok(signature);
-                    }
-                }
+            // Return when specified commitment is reached
+            // Failed transactions have already been eliminated, `is_some` check is sufficient
+            if self
+                .get_signature_status_with_commitment(&signature, commitment)?
+                .is_some()
+            {
+                progress_bar.set_message("Transaction confirmed");
+                progress_bar.finish_and_clear();
+                return Ok(signature);
             }
+
             progress_bar.set_message(&format!(
                 "[{}/{}] Finalizing transaction {}",
-                confirmations + 1,
+                min(confirmations + 1, desired_confirmations),
                 desired_confirmations,
                 signature,
             ));

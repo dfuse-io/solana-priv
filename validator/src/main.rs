@@ -328,7 +328,7 @@ fn check_vote_account(
     authorized_voter_pubkeys: &[Pubkey],
 ) -> Result<(), String> {
     let vote_account = rpc_client
-        .get_account_with_commitment(vote_account_address, CommitmentConfig::root())
+        .get_account_with_commitment(vote_account_address, CommitmentConfig::single_gossip())
         .map_err(|err| format!("failed to fetch vote account: {}", err.to_string()))?
         .value
         .ok_or_else(|| format!("vote account does not exist: {}", vote_account_address))?;
@@ -341,7 +341,7 @@ fn check_vote_account(
     }
 
     let identity_account = rpc_client
-        .get_account_with_commitment(identity_pubkey, CommitmentConfig::root())
+        .get_account_with_commitment(identity_pubkey, CommitmentConfig::single_gossip())
         .map_err(|err| format!("failed to fetch identity account: {}", err.to_string()))?
         .value
         .ok_or_else(|| format!("identity account does not exist: {}", identity_pubkey))?;
@@ -890,6 +890,7 @@ pub fn main() {
     let default_rpc_send_transaction_leader_forward_count = ValidatorConfig::default()
         .send_transaction_leader_forward_count
         .to_string();
+    let default_rpc_threads = num_cpus::get().to_string();
 
     let matches = App::new(crate_name!()).about(crate_description!())
         .version(solana_version::version!())
@@ -1342,6 +1343,24 @@ pub fn main() {
                 .help("IP address to bind the RPC port [default: use --bind-address]"),
         )
         .arg(
+            Arg::with_name("rpc_threads")
+                .long("rpc-threads")
+                .value_name("NUMBER")
+                .validator(is_parsable::<usize>)
+                .takes_value(true)
+                .default_value(&default_rpc_threads)
+                .help("Number of threads to use for servicing RPC requests"),
+        )
+        .arg(
+            Arg::with_name("rpc_bigtable_timeout")
+                .long("rpc-bigtable-timeout")
+                .value_name("SECONDS")
+                .validator(is_parsable::<u64>)
+                .takes_value(true)
+                .default_value("30")
+                .help("Number of seconds before timing out RPC requests backed by BigTable"),
+        )
+        .arg(
             Arg::with_name("rpc_pubsub_enable_vote_subscription")
                 .long("rpc-pubsub-enable-vote-subscription")
                 .takes_value(false)
@@ -1618,6 +1637,10 @@ pub fn main() {
                 "health_check_slot_distance",
                 u64
             ),
+            rpc_threads: value_t_or_exit!(matches, "rpc_threads", usize),
+            rpc_bigtable_timeout: value_t!(matches, "rpc_bigtable_timeout", u64)
+                .ok()
+                .map(Duration::from_secs),
             account_indexes: account_indexes.clone(),
         },
         rpc_addrs: value_t!(matches, "rpc_port", u16).ok().map(|rpc_port| {

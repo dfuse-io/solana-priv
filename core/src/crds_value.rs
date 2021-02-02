@@ -644,6 +644,8 @@ mod test {
     use super::*;
     use crate::contact_info::ContactInfo;
     use bincode::deserialize;
+    use rand::SeedableRng;
+    use rand_chacha::ChaChaRng;
     use solana_perf::test_tx::test_tx;
     use solana_sdk::signature::{Keypair, Signer};
     use solana_sdk::timing::timestamp;
@@ -822,7 +824,8 @@ mod test {
 
     #[test]
     fn test_filter_current() {
-        let mut rng = rand::thread_rng();
+        let seed = [48u8; 32];
+        let mut rng = ChaChaRng::from_seed(seed);
         let keys: Vec<_> = repeat_with(Keypair::new).take(16).collect();
         let values: Vec<_> = repeat_with(|| {
             let index = rng.gen_range(0, keys.len());
@@ -842,8 +845,11 @@ mod test {
             match value.wallclock().cmp(&current_value.wallclock()) {
                 Ordering::Less => (),
                 Ordering::Equal => {
-                    assert_eq!(value, *current_value);
-                    count += 1;
+                    // There is a chance that two randomly generated
+                    // crds-values have the same label and wallclock.
+                    if value == *current_value {
+                        count += 1;
+                    }
                 }
                 Ordering::Greater => panic!("this should not happen!"),
             }

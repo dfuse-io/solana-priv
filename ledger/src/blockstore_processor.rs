@@ -18,8 +18,8 @@ use solana_rayon_threadlimit::get_thread_count;
 use solana_runtime::{
     accounts_index::AccountIndex,
     bank::{
-        Bank, InnerInstructionsList, TransactionBalancesSet, TransactionExecutionResult,
-        TransactionLogMessages, TransactionResults,
+        Bank, ExecuteTimings, InnerInstructionsList, TransactionBalancesSet,
+        TransactionExecutionResult, TransactionLogMessages, TransactionResults,
     },
     bank_forks::BankForks,
     bank_utils,
@@ -38,6 +38,10 @@ use solana_sdk::{
     transaction::{Result, Transaction, TransactionError},
     deepmind::deepmind_enabled,
 };
+use solana_transaction_status::token_balances::{
+    collect_token_balances, TransactionTokenBalancesSet,
+};
+
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
@@ -106,8 +110,19 @@ fn execute_batch(
     bank: &Arc<Bank>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
+    timings: &mut ExecuteTimings,
     dmbatch_context: &Option<Rc<RefCell<DMBatchContext>>>
 ) -> Result<()> {
+    let record_token_balances = transaction_status_sender.is_some();
+
+    let mut mint_decimals: HashMap<Pubkey, u8> = HashMap::new();
+
+    let pre_token_balances = if record_token_balances {
+        collect_token_balances(&bank, &batch, &mut mint_decimals)
+    } else {
+        vec![]
+    };
+
     let (tx_results, balances, inner_instructions, transaction_logs) =
         batch.bank().load_execute_and_commit_transactions(
             batch,
@@ -115,6 +130,7 @@ fn execute_batch(
             transaction_status_sender.is_some(),
             transaction_status_sender.is_some(),
             transaction_status_sender.is_some(),
+            timings,
             dmbatch_context,
         );
 
@@ -127,12 +143,22 @@ fn execute_batch(
     } = tx_results;
 
     if let Some(sender) = transaction_status_sender {
+        let post_token_balances = if record_token_balances {
+            collect_token_balances(&bank, &batch, &mut mint_decimals)
+        } else {
+            vec![]
+        };
+
+        let token_balances =
+            TransactionTokenBalancesSet::new(pre_token_balances, post_token_balances);
+
         send_transaction_status_batch(
             bank.clone(),
             batch.transactions(),
             batch.iteration_order_vec(),
             execution_results,
             balances,
+            token_balances,
             inner_instructions,
             transaction_logs,
             sender,
@@ -151,39 +177,46 @@ fn execute_batches(
     entry_callback: Option<&ProcessCallback>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
+    timings: &mut ExecuteTimings,
     _dmslot_number: Option<u64>,
 ) -> Result<()> {
     inc_new_counter_debug!("bank-par_execute_entries-count", batches.len());
 
+    let (results, new_timings): (Vec<Result<()>>, Vec<ExecuteTimings>) =
+        PAR_THREAD_POOL.with(|thread_pool| {
+            thread_pool.borrow().install(|| {
+                let i:AtomicU64 = AtomicU64::new(0);
+                batches
+                    .into_par_iter()
+                    .map_with(transaction_status_sender, |sender, batch| {
+                        let mut timings = ExecuteTimings::default();
+                        let mut dmbatch_ctx_opt: Option<Rc<RefCell<DMBatchContext>>> = None;
+                        if deepmind_enabled() {
+                            let batch_id = i.fetch_add(1, Ordering::Relaxed);
+                            let file_number = GLOBAL_DEEP_MIND_FILE_NUMBER.fetch_add(1, Ordering::SeqCst);
+                            let ctx = DMBatchContext::new(batch_id, file_number);
+                            dmbatch_ctx_opt = Some(Rc::new(RefCell::new(ctx)));
+                        }
+                        let result = execute_batch(
+                            batch,
+                            bank,
+                            sender.clone(),
+                            replay_vote_sender,
+                            &mut timings,
+                            &dmbatch_ctx_opt,
+                        );
+                        if let Some(entry_callback) = entry_callback {
+                            entry_callback(bank);
+                        }
+                        (result, timings)
+                    })
+                    .unzip()
+            })
+        });
 
-    let results: Vec<Result<()>> = PAR_THREAD_POOL.with(|thread_pool| {
-        thread_pool.borrow().install(|| {
-            let i:AtomicU64 = AtomicU64::new(0);
-
-            batches
-                .into_par_iter()
-                .map_with(transaction_status_sender, |sender, batch| {
-                    let mut dmbatch_ctx_opt: Option<Rc<RefCell<DMBatchContext>>> = None;
-                    if deepmind_enabled() {
-                        let batch_id = i.fetch_add(1, Ordering::Relaxed);
-                        let file_number = GLOBAL_DEEP_MIND_FILE_NUMBER.fetch_add(1, Ordering::SeqCst);
-                        let ctx = DMBatchContext::new(batch_id, file_number);
-                        dmbatch_ctx_opt = Some(Rc::new(RefCell::new(ctx)));
-                    }
-                    let result = execute_batch(batch, bank, sender.clone(), replay_vote_sender, &dmbatch_ctx_opt);
-                    if let Some(entry_callback) = entry_callback {
-                        entry_callback(bank);
-                    }
-
-                    if let Some(ctx_ref) = &dmbatch_ctx_opt {
-                        ctx_ref.borrow_mut().flush();
-                    }
-
-                    result
-                })
-                .collect()
-        })
-    });
+    for timing in new_timings {
+        timings.accumulate(&timing);
+    }
 
     if deepmind_enabled() && batches.len() > 0 {
         println!("DMLOG BATCHES_END");
@@ -211,6 +244,7 @@ pub fn process_entries(
         None,
         transaction_status_sender,
         replay_vote_sender,
+        &mut ExecuteTimings::default(),
         None
     )
 }
@@ -222,6 +256,7 @@ fn process_entries_with_callback(
     entry_callback: Option<&ProcessCallback>,
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
+    timings: &mut ExecuteTimings,
     dmslot_number: Option<u64>,
 ) -> Result<()> {
     // accumulator for entries that can be processed in parallel
@@ -242,6 +277,7 @@ fn process_entries_with_callback(
                     entry_callback,
                     transaction_status_sender.clone(),
                     replay_vote_sender,
+                    timings,
                     dmslot_number,
                 )?;
 
@@ -305,6 +341,7 @@ fn process_entries_with_callback(
                     entry_callback,
                     transaction_status_sender.clone(),
                     replay_vote_sender,
+                    timings,
                     dmslot_number,
                 )?;
                 batches.clear();
@@ -317,6 +354,7 @@ fn process_entries_with_callback(
         entry_callback,
         transaction_status_sender,
         replay_vote_sender,
+        timings,
         dmslot_number,
     )?;
     for hash in tick_hashes {
@@ -609,6 +647,7 @@ pub struct ConfirmationTiming {
     pub transaction_verify_elapsed: u64,
     pub fetch_elapsed: u64,
     pub fetch_fail_elapsed: u64,
+    pub execute_timings: ExecuteTimings,
 }
 
 impl Default for ConfirmationTiming {
@@ -620,6 +659,7 @@ impl Default for ConfirmationTiming {
             transaction_verify_elapsed: 0,
             fetch_elapsed: 0,
             fetch_fail_elapsed: 0,
+            execute_timings: ExecuteTimings::default(),
         }
     }
 }
@@ -738,6 +778,7 @@ pub fn confirm_slot(
     //****************************************************************
 
     let mut replay_elapsed = Measure::start("replay_elapsed");
+    let mut execute_timings = ExecuteTimings::default();
     let process_result = process_entries_with_callback(
         bank,
         &entries,
@@ -745,11 +786,14 @@ pub fn confirm_slot(
         entry_callback,
         transaction_status_sender,
         replay_vote_sender,
+        &mut execute_timings,
         Some(slot),
     )
     .map_err(BlockstoreProcessorError::from);
     replay_elapsed.stop();
     timing.replay_elapsed += replay_elapsed.as_us();
+
+    timing.execute_timings.accumulate(&execute_timings);
 
     if let Some(mut verifier) = verifier {
         let verified = verifier.finish_verify(&entries);
@@ -884,7 +928,7 @@ fn load_frozen_forks(
     let mut last_status_report = Instant::now();
     let mut last_free = Instant::now();
     let mut pending_slots = vec![];
-    let mut last_root_slot = root_bank.slot();
+    let mut last_root = root_bank.slot();
     let mut slots_elapsed = 0;
     let mut txs = 0;
     let blockstore_max_root = blockstore.max_root();
@@ -912,7 +956,7 @@ fn load_frozen_forks(
             info!(
                 "processing ledger: slot={}, last root slot={} slots={} slots/s={:?} txs/s={}",
                 slot,
-                last_root_slot,
+                last_root,
                 slots_elapsed,
                 slots_elapsed as f32 / secs,
                 txs as f32 / secs,
@@ -949,7 +993,7 @@ fn load_frozen_forks(
         // If we've reached the last known root in blockstore, start looking
         // for newer cluster confirmed roots
         let new_root_bank = {
-            if *root == max_root {
+            if *root >= max_root {
                 supermajority_root_from_vote_accounts(
                     bank.slot(),
                     bank.total_epoch_stake(),
@@ -979,7 +1023,8 @@ fn load_frozen_forks(
 
         if let Some(new_root_bank) = new_root_bank {
             *root = new_root_bank.slot();
-            last_root_slot = new_root_bank.slot();
+            last_root = new_root_bank.slot();
+
             leader_schedule_cache.set_root(&new_root_bank);
             new_root_bank.squash();
 
@@ -999,7 +1044,7 @@ fn load_frozen_forks(
 
         trace!(
             "Bank for {}slot {} is complete. {} bytes allocated",
-            if last_root_slot == slot { "root " } else { "" },
+            if last_root == slot { "root " } else { "" },
             slot,
             allocated.since(initial_allocation)
         );
@@ -1118,6 +1163,7 @@ pub struct TransactionStatusBatch {
     pub iteration_order: Option<Vec<usize>>,
     pub statuses: Vec<TransactionExecutionResult>,
     pub balances: TransactionBalancesSet,
+    pub token_balances: TransactionTokenBalancesSet,
     pub inner_instructions: Vec<Option<InnerInstructionsList>>,
     pub transaction_logs: Vec<TransactionLogMessages>,
 }
@@ -1130,6 +1176,7 @@ pub fn send_transaction_status_batch(
     iteration_order: Option<Vec<usize>>,
     statuses: Vec<TransactionExecutionResult>,
     balances: TransactionBalancesSet,
+    token_balances: TransactionTokenBalancesSet,
     inner_instructions: Vec<Option<InnerInstructionsList>>,
     transaction_logs: Vec<TransactionLogMessages>,
     transaction_status_sender: TransactionStatusSender,
@@ -1141,6 +1188,7 @@ pub fn send_transaction_status_batch(
         iteration_order,
         statuses,
         balances,
+        token_balances,
         inner_instructions,
         transaction_logs,
     }) {
@@ -2909,7 +2957,10 @@ pub mod tests {
         let entry = next_entry(&new_blockhash, 1, vec![tx]);
         entries.push(entry);
 
-        process_entries_with_callback(&bank0, &entries, true, None, None, None, None).unwrap();
+        process_entries_with_callback(&bank0, &entries, true, None, None, None, None,
+            &mut ExecuteTimings::default(),
+        )
+        .unwrap();
         assert_eq!(bank0.get_balance(&keypair.pubkey()), 1)
     }
 
@@ -3001,6 +3052,7 @@ pub mod tests {
             false,
             false,
             false,
+            &mut ExecuteTimings::default(),
             &None,
         );
         let (err, signature) = get_first_error(&batch, fee_collection_results).unwrap();
@@ -3136,6 +3188,8 @@ pub mod tests {
                   ...    minor fork
                   /
             `last_slot`
+                 |
+            `really_last_slot`
         */
         let starting_fork_slot = 5;
         let mut main_fork = tr(starting_fork_slot);
@@ -3143,10 +3197,12 @@ pub mod tests {
 
         // Make enough slots to make a root slot > blockstore_root
         let expected_root_slot = starting_fork_slot + blockstore_root.unwrap_or(0);
+        let really_expected_root_slot = expected_root_slot + 1;
         let last_main_fork_slot = expected_root_slot + MAX_LOCKOUT_HISTORY as u64 + 1;
+        let really_last_main_fork_slot = last_main_fork_slot + 1;
 
         // Make `minor_fork`
-        let last_minor_fork_slot = last_main_fork_slot + 1;
+        let last_minor_fork_slot = really_last_main_fork_slot + 1;
         let minor_fork = tr(last_minor_fork_slot);
 
         // Make 'main_fork`
@@ -3181,6 +3237,7 @@ pub mod tests {
         let (bank_forks, _leader_schedule) =
             process_blockstore(&genesis_config, &blockstore, Vec::new(), opts.clone()).unwrap();
 
+        // prepare to add votes
         let last_vote_bank_hash = bank_forks.get(last_main_fork_slot - 1).unwrap().hash();
         let last_vote_blockhash = bank_forks
             .get(last_main_fork_slot - 1)
@@ -3210,12 +3267,12 @@ pub mod tests {
         );
 
         let (bank_forks, _leader_schedule) =
-            process_blockstore(&genesis_config, &blockstore, Vec::new(), opts).unwrap();
+            process_blockstore(&genesis_config, &blockstore, Vec::new(), opts.clone()).unwrap();
 
         assert_eq!(bank_forks.root(), expected_root_slot);
         assert_eq!(
             bank_forks.frozen_banks().len() as u64,
-            last_minor_fork_slot - expected_root_slot + 1
+            last_minor_fork_slot - really_expected_root_slot + 1
         );
 
         // Minor fork at `last_main_fork_slot + 1` was above the `expected_root_slot`
@@ -3223,6 +3280,10 @@ pub mod tests {
         //
         // Fork at slot 2 was purged because it was below the `expected_root_slot`
         for slot in 0..=last_minor_fork_slot {
+            // this slot will be created below
+            if slot == really_last_main_fork_slot {
+                continue;
+            }
             if slot >= expected_root_slot {
                 let bank = bank_forks.get(slot).unwrap();
                 assert_eq!(bank.slot(), slot);
@@ -3231,11 +3292,48 @@ pub mod tests {
                 assert!(bank_forks.get(slot).is_none());
             }
         }
+
+        // really prepare to add votes
+        let last_vote_bank_hash = bank_forks.get(last_main_fork_slot).unwrap().hash();
+        let last_vote_blockhash = bank_forks
+            .get(last_main_fork_slot)
+            .unwrap()
+            .last_blockhash();
+        let slots: Vec<_> = vec![last_main_fork_slot];
+        let vote_tx = vote_transaction::new_vote_transaction(
+            slots,
+            last_vote_bank_hash,
+            last_vote_blockhash,
+            &leader_keypair,
+            &validator_keypairs.vote_keypair,
+            &validator_keypairs.vote_keypair,
+            None,
+        );
+
+        // Add votes to `really_last_slot` so that `root` will be confirmed again
+        make_slot_with_vote_tx(
+            &blockstore,
+            ticks_per_slot,
+            really_last_main_fork_slot,
+            last_main_fork_slot,
+            &last_vote_blockhash,
+            vote_tx,
+            &leader_keypair,
+        );
+
+        let (bank_forks, _leader_schedule) =
+            process_blockstore(&genesis_config, &blockstore, Vec::new(), opts).unwrap();
+
+        assert_eq!(bank_forks.root(), really_expected_root_slot);
     }
 
     #[test]
-    fn test_process_blockstore_with_supermajority_root() {
+    fn test_process_blockstore_with_supermajority_root_without_blockstore_root() {
         run_test_process_blockstore_with_supermajority_root(None);
+    }
+
+    #[test]
+    fn test_process_blockstore_with_supermajority_root_with_blockstore_root() {
         run_test_process_blockstore_with_supermajority_root(Some(1))
     }
 
