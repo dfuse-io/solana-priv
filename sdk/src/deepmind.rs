@@ -4,7 +4,7 @@ use crate::pb::codec::{
 use num_traits::ToPrimitive;
 use protobuf::{Message, RepeatedField, SingularPtrField};
 use solana_program::hash::Hash;
-use solana_sdk::{keyed_account::KeyedAccount, pubkey::Pubkey};
+use solana_sdk::{pubkey::Pubkey};
 use std::{borrow::BorrowMut, env, fs::File, str::FromStr, sync::atomic::{AtomicBool, Ordering}};
 
 pub static DEEPMIND_ENABLED: AtomicBool = AtomicBool::new(false);

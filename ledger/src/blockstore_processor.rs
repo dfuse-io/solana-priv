@@ -178,7 +178,6 @@ fn execute_batches(
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
     timings: &mut ExecuteTimings,
-    _dmslot_number: Option<u64>,
 ) -> Result<()> {
     inc_new_counter_debug!("bank-par_execute_entries-count", batches.len());
 
@@ -208,6 +207,11 @@ fn execute_batches(
                         if let Some(entry_callback) = entry_callback {
                             entry_callback(bank);
                         }
+
+                        if let Some(ctx_ref) = &dmbatch_ctx_opt {
+                            ctx_ref.borrow_mut().flush();
+                        }
+
                         (result, timings)
                     })
                     .unzip()
@@ -244,8 +248,7 @@ pub fn process_entries(
         None,
         transaction_status_sender,
         replay_vote_sender,
-        &mut ExecuteTimings::default(),
-        None
+        &mut ExecuteTimings::default()
     )
 }
 
@@ -257,7 +260,6 @@ fn process_entries_with_callback(
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
     timings: &mut ExecuteTimings,
-    dmslot_number: Option<u64>,
 ) -> Result<()> {
     // accumulator for entries that can be processed in parallel
     let mut batches = vec![];
@@ -278,7 +280,6 @@ fn process_entries_with_callback(
                     transaction_status_sender.clone(),
                     replay_vote_sender,
                     timings,
-                    dmslot_number,
                 )?;
 
                 batches.clear();
@@ -342,7 +343,6 @@ fn process_entries_with_callback(
                     transaction_status_sender.clone(),
                     replay_vote_sender,
                     timings,
-                    dmslot_number,
                 )?;
                 batches.clear();
             }
@@ -355,7 +355,6 @@ fn process_entries_with_callback(
         transaction_status_sender,
         replay_vote_sender,
         timings,
-        dmslot_number,
     )?;
     for hash in tick_hashes {
         bank.register_tick(&hash);
@@ -786,8 +785,7 @@ pub fn confirm_slot(
         entry_callback,
         transaction_status_sender,
         replay_vote_sender,
-        &mut execute_timings,
-        Some(slot),
+        &mut execute_timings
     )
     .map_err(BlockstoreProcessorError::from);
     replay_elapsed.stop();
@@ -2957,9 +2955,7 @@ pub mod tests {
         let entry = next_entry(&new_blockhash, 1, vec![tx]);
         entries.push(entry);
 
-        process_entries_with_callback(&bank0, &entries, true, None, None, None, None,
-            &mut ExecuteTimings::default(),
-        )
+        process_entries_with_callback(&bank0, &entries, true, None, None, None, &mut ExecuteTimings::default())
         .unwrap();
         assert_eq!(bank0.get_balance(&keypair.pubkey()), 1)
     }
