@@ -54,6 +54,7 @@ use std::{
     thread::{self, Builder, JoinHandle},
     time::Duration,
 };
+use solana_sdk::deepmind::deepmind_enabled;
 
 pub const MAX_ENTRY_RECV_PER_ITER: usize = 512;
 pub const SUPERMINORITY_THRESHOLD: f64 = 1f64 / 3f64;
@@ -295,6 +296,11 @@ impl ReplayStage {
 
                     let start = allocated.get();
                     let mut replay_active_banks_time = Measure::start("replay_active_banks_time");
+
+                    if deepmind_enabled() {
+                        println!("DMLOG ROOT_BEFORE {}",bank_forks.read().unwrap().root());
+                    }
+
                     let did_complete_bank = Self::replay_active_banks(
                         &blockstore,
                         &bank_forks,
@@ -310,6 +316,10 @@ impl ReplayStage {
                     );
                     replay_active_banks_time.stop();
                     Self::report_memory(&allocated, "replay_active_banks", start);
+
+                    if deepmind_enabled() {
+                        println!("DMLOG ROOT_MIDWAY {}",bank_forks.read().unwrap().root());
+                    }
 
                     let mut reset_duplicate_slots_time = Measure::start("reset_duplicate_slots");
                     let mut ancestors = bank_forks.read().unwrap().ancestors();
@@ -458,6 +468,10 @@ impl ReplayStage {
                         )?;
                     };
                     voting_time.stop();
+
+                    if deepmind_enabled() {
+                        println!("DMLOG ROOT_AFTER {}",bank_forks.read().unwrap().root());
+                    }
 
                     Self::report_memory(&allocated, "votable_bank", start);
                     let start = allocated.get();

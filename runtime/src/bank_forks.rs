@@ -16,6 +16,7 @@ use std::{
 };
 
 pub use crate::snapshot_utils::SnapshotVersion;
+use solana_sdk::deepmind::deepmind_enabled;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArchiveFormat {
@@ -173,6 +174,11 @@ impl BankForks {
         snapshot_request_sender: &Option<SnapshotRequestSender>,
         highest_confirmed_root: Option<Slot>,
     ) {
+
+        if deepmind_enabled() {
+            println!("DMLOG SET_ROOT {} {}",self.root,root);
+        }
+
         let old_epoch = self.root_bank().epoch();
         self.root = root;
         let set_root_start = Instant::now();
