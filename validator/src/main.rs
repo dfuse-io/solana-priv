@@ -1537,7 +1537,7 @@ pub fn main() {
 
     if matches.is_present("deepmind") {
         enable_deepmind();
-        println!("DMLOG INIT VERSION 1");
+        println!("DMLOG INIT VERSION 2");
     }
 
     let private_rpc = matches.is_present("private_rpc");

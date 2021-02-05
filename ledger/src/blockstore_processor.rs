@@ -758,7 +758,7 @@ pub fn confirm_slot(
     //****************************************************************
     if deepmind_enabled() && num_entries != 0 {
         println!(
-            "DMLOG SLOT_WORK {} {} {} {} {} {} {} {} {} {} {} {} {}",
+            "DMLOG BLOCK_WORK {} {} {} {} {} {} {} {} {} {} {} {} {}",
             bank.parent_slot(),
             slot,
             if slot_full { "full" } else { "partial" },
@@ -808,10 +808,10 @@ pub fn confirm_slot(
     //****************************************************************
     if deepmind_enabled() {
         if process_result.is_err() {
-            println!("DMLOG SLOT_FAILED {} {:#?}", slot, process_result);
+            println!("DMLOG BLOCK_FAILED {} {:#?}", slot, process_result);
         } else {
             if slot_full {
-                println!("DMLOG SLOT_END {} {} {} {}", slot, entries.last().unwrap().hash, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
+                println!("DMLOG BLOCK_END {} {} {} {}", slot, entries.last().unwrap().hash, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
             }
         }
     }
@@ -1018,6 +1018,12 @@ fn load_frozen_forks(
                 None
             }
         };
+
+        if let Some(new_root_bank) = new_root_bank {
+            println!("DMLOG BLOCK_ROOT {}",new_root_bank.slot());
+        } else {
+            println!("DMLOG BLOCK_ROOT {}", *root);
+        }
 
         if let Some(new_root_bank) = new_root_bank {
             *root = new_root_bank.slot();

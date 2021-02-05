@@ -297,10 +297,6 @@ impl ReplayStage {
                     let start = allocated.get();
                     let mut replay_active_banks_time = Measure::start("replay_active_banks_time");
 
-                    if deepmind_enabled() {
-                        println!("DMLOG ROOT_BEFORE {}",bank_forks.read().unwrap().root());
-                    }
-
                     let did_complete_bank = Self::replay_active_banks(
                         &blockstore,
                         &bank_forks,
@@ -316,10 +312,6 @@ impl ReplayStage {
                     );
                     replay_active_banks_time.stop();
                     Self::report_memory(&allocated, "replay_active_banks", start);
-
-                    if deepmind_enabled() {
-                        println!("DMLOG ROOT_MIDWAY {}",bank_forks.read().unwrap().root());
-                    }
 
                     let mut reset_duplicate_slots_time = Measure::start("reset_duplicate_slots");
                     let mut ancestors = bank_forks.read().unwrap().ancestors();
@@ -470,7 +462,7 @@ impl ReplayStage {
                     voting_time.stop();
 
                     if deepmind_enabled() {
-                        println!("DMLOG ROOT_AFTER {}",bank_forks.read().unwrap().root());
+                        println!("DMLOG BLOCK_ROOT {}",bank_forks.read().unwrap().root());
                     }
 
                     Self::report_memory(&allocated, "votable_bank", start);
