@@ -462,7 +462,7 @@ impl ReplayStage {
                     voting_time.stop();
 
                     if deepmind_enabled() {
-                        println!("DMLOG BLOCK_ROOT {}",bank_forks.read().unwrap().root());
+                        println!("DMLOG BLOCK_ROOT {}", bank_forks.read().unwrap().root());
                     }
 
                     Self::report_memory(&allocated, "votable_bank", start);

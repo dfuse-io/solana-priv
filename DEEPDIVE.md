@@ -126,6 +126,7 @@ core/src/replay_stage.rs:1252:            fn replay_active_banks(
 
     calls into `replay_blockstore_into_bank()`
 
+(`fn check_dead_fork()` also calls into it, but is used only in tests)
 core/src/replay_stage.rs:947:            fn replay_blockstore_into_bank(
 
     both call into: `confirm_slot()`

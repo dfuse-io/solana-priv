@@ -1019,10 +1019,12 @@ fn load_frozen_forks(
             }
         };
 
-        if let Some(new_root_bank) = new_root_bank {
-            println!("DMLOG BLOCK_ROOT {}",new_root_bank.slot());
-        } else {
-            println!("DMLOG BLOCK_ROOT {}", *root);
+        if deepmind_enabled() {
+            if let Some(new_root_bank) = new_root_bank {
+                println!("DMLOG BLOCK_ROOT {}", new_root_bank.slot());
+            } else {
+                println!("DMLOG BLOCK_ROOT {}", *root);
+            }
         }
 
         if let Some(new_root_bank) = new_root_bank {
