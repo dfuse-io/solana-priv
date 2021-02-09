@@ -1042,6 +1042,7 @@ impl ReplayStage {
             inc_new_counter_info!("replay_stage-voted_empty_bank", 1);
         }
         trace!("handle votable bank {}", bank.slot());
+        println!("DMLOG bank_forks before root {}", bank_forks.read().unwrap().root());
         let (vote, tower_index) = tower.new_vote_from_bank(bank, vote_account_pubkey);
         let new_root = tower.record_bank_vote(vote);
         let last_vote = tower.last_vote_and_timestamp();
@@ -1066,6 +1067,8 @@ impl ReplayStage {
             // bank_forks.root is consumed by repair_service to update gossip, so we don't want to
             // get shreds for repair on gossip before we update leader schedule, otherwise they may
             // get dropped.
+            println!("DMLOG new_root {}", new_root);
+            println!("DMLOG root_bank_hash {}", root_bank.hash());
             leader_schedule_cache.set_root(rooted_banks.last().unwrap());
             blockstore
                 .set_roots(&rooted_slots)
@@ -1105,6 +1108,7 @@ impl ReplayStage {
             info!("new root {}", new_root);
         }
 
+        println!("DMLOG bank_forks after root {}", bank_forks.read().unwrap().root());
         Self::update_commitment_cache(
             bank.clone(),
             bank_forks.read().unwrap().root(),
