@@ -313,11 +313,16 @@ impl ReplayStage {
                     replay_active_banks_time.stop();
                     Self::report_memory(&allocated, "replay_active_banks", start);
 
+
                     let mut reset_duplicate_slots_time = Measure::start("reset_duplicate_slots");
                     let mut ancestors = bank_forks.read().unwrap().ancestors();
                     let mut descendants = bank_forks.read().unwrap().descendants();
                     let forks_root = bank_forks.read().unwrap().root();
                     let start = allocated.get();
+
+                    if deepmind_enabled() {
+                        println!("DMLOG BLOCK_ROOT {}", forks_root);
+                    }
 
                     // Reset any duplicate slots that have been confirmed
                     // by the network in anticipation of the confirmed version of
@@ -460,10 +465,6 @@ impl ReplayStage {
                         )?;
                     };
                     voting_time.stop();
-
-                    if deepmind_enabled() {
-                        println!("DMLOG BLOCK_ROOT {}", bank_forks.read().unwrap().root());
-                    }
 
                     Self::report_memory(&allocated, "votable_bank", start);
                     let start = allocated.get();
