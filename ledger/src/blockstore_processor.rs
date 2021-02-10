@@ -757,8 +757,15 @@ pub fn confirm_slot(
     // DMLOG
     //****************************************************************
     if deepmind_enabled() && num_entries != 0 {
+        let mut ids = Vec::<String>::new();
+        for entry in &entries {
+            for trx in &entry.transactions {
+                ids.push(format!("{}", &trx.signatures[0]));
+            };
+        };
+
         println!(
-            "DMLOG BLOCK_WORK {} {} {} {} {} {} {} {} {} {} {} {} {}",
+            "DMLOG BLOCK_WORK {} {} {} {} {} {} {} {} {} {} {} {} {} T;{}",
             bank.parent_slot(),
             slot,
             if slot_full { "full" } else { "partial" },
@@ -772,6 +779,7 @@ pub fn confirm_slot(
             progress.num_shreds,
             progress.last_entry,
             progress.tick_hash_count,
+            ids.join(";"),
         );
     }
     //****************************************************************
