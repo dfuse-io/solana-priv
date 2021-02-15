@@ -1164,10 +1164,6 @@ fn process_single_slot(
 
     bank.freeze(); // all banks handled by this routine are created from complete slots
 
-    if deepmind_enabled() {
-        println!("DMLOG BLOCK_FREEZE {} {}", bank.slot(), bank.hash());
-    }
-
     Ok(())
 }
 
