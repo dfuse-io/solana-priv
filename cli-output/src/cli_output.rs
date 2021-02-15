@@ -1,5 +1,8 @@
 use crate::{
-    display::{build_balance_message, format_labeled_address, writeln_name_value},
+    display::{
+        build_balance_message, build_balance_message_with_config, format_labeled_address,
+        writeln_name_value, BuildBalanceMessageConfig,
+    },
     QuietDisplay, VerboseDisplay,
 };
 use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
@@ -359,6 +362,42 @@ impl fmt::Display for CliValidators {
                 },
             )
         }
+        writeln!(
+            f,
+            "{}",
+            style(format!(
+                "  {:<44}  {:<38}  {}  {}  {}  {:>10}  {:^8}  {}",
+                "Identity",
+                "Vote Account",
+                "Commission",
+                "Last Vote",
+                "Root Block",
+                "Credits",
+                "Version",
+                "Active Stake",
+            ))
+            .bold()
+        )?;
+        for validator in &self.current_validators {
+            write_vote_account(
+                f,
+                validator,
+                self.total_active_stake,
+                self.use_lamports_unit,
+                false,
+            )?;
+        }
+        for validator in &self.delinquent_validators {
+            write_vote_account(
+                f,
+                validator,
+                self.total_active_stake,
+                self.use_lamports_unit,
+                true,
+            )?;
+        }
+
+        writeln!(f)?;
         writeln_name_value(
             f,
             "Active Stake:",
@@ -410,41 +449,6 @@ impl fmt::Display for CliValidators {
             )?;
         }
 
-        writeln!(f)?;
-        writeln!(
-            f,
-            "{}",
-            style(format!(
-                "  {:<44}  {:<38}  {}  {}  {}  {:>10}  {:^8}  {}",
-                "Identity",
-                "Vote Account",
-                "Commission",
-                "Last Vote",
-                "Root Block",
-                "Credits",
-                "Version",
-                "Active Stake",
-            ))
-            .bold()
-        )?;
-        for validator in &self.current_validators {
-            write_vote_account(
-                f,
-                validator,
-                self.total_active_stake,
-                self.use_lamports_unit,
-                false,
-            )?;
-        }
-        for validator in &self.delinquent_validators {
-            write_vote_account(
-                f,
-                validator,
-                self.total_active_stake,
-                self.use_lamports_unit,
-                true,
-            )?;
-        }
         Ok(())
     }
 }
@@ -866,14 +870,19 @@ impl fmt::Display for CliStakeHistory {
             ))
             .bold()
         )?;
+        let config = BuildBalanceMessageConfig {
+            use_lamports_unit: self.use_lamports_unit,
+            show_unit: false,
+            trim_trailing_zeros: false,
+        };
         for entry in &self.entries {
             writeln!(
                 f,
                 "  {:>5}  {:>20}  {:>20}  {:>20} {}",
                 entry.epoch,
-                build_balance_message(entry.effective_stake, self.use_lamports_unit, false),
-                build_balance_message(entry.activating_stake, self.use_lamports_unit, false),
-                build_balance_message(entry.deactivating_stake, self.use_lamports_unit, false),
+                build_balance_message_with_config(entry.effective_stake, &config),
+                build_balance_message_with_config(entry.activating_stake, &config),
+                build_balance_message_with_config(entry.deactivating_stake, &config),
                 if self.use_lamports_unit {
                     "lamports"
                 } else {
@@ -1528,6 +1537,37 @@ pub fn parse_sign_only_reply_string(reply: &str) -> SignOnly {
         present_signers,
         absent_signers,
         bad_signers,
+    }
+}
+
+#[derive(Debug)]
+pub enum CliSignatureVerificationStatus {
+    None,
+    Pass,
+    Fail,
+}
+
+impl CliSignatureVerificationStatus {
+    pub fn verify_transaction(tx: &Transaction) -> Vec<Self> {
+        tx.verify_with_results()
+            .iter()
+            .zip(&tx.signatures)
+            .map(|(stat, sig)| match stat {
+                true => CliSignatureVerificationStatus::Pass,
+                false if sig == &Signature::default() => CliSignatureVerificationStatus::None,
+                false => CliSignatureVerificationStatus::Fail,
+            })
+            .collect()
+    }
+}
+
+impl fmt::Display for CliSignatureVerificationStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::None => write!(f, "none"),
+            Self::Pass => write!(f, "pass"),
+            Self::Fail => write!(f, "fail"),
+        }
     }
 }
 
