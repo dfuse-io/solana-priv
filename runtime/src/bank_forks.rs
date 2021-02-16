@@ -16,7 +16,6 @@ use std::{
 };
 
 pub use crate::snapshot_utils::SnapshotVersion;
-use solana_sdk::deepmind::deepmind_enabled;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArchiveFormat {

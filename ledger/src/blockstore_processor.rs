@@ -996,6 +996,10 @@ fn load_frozen_forks(
         assert!(bank.is_frozen());
         all_banks.insert(bank.slot(), bank.clone());
 
+        if deepmind_enabled() {
+            println!("DMLOG BLOCK_ROOT {}", *root);
+        }
+
         // If we've reached the last known root in blockstore, start looking
         // for newer cluster confirmed roots
         let new_root_bank = {
@@ -1026,14 +1030,6 @@ fn load_frozen_forks(
                 None
             }
         };
-
-        if deepmind_enabled() {
-            if let Some(new_root_bank) = new_root_bank {
-                println!("DMLOG BLOCK_ROOT {}", new_root_bank.slot());
-            } else {
-                println!("DMLOG BLOCK_ROOT {}", *root);
-            }
-        }
 
         if let Some(new_root_bank) = new_root_bank {
             *root = new_root_bank.slot();
