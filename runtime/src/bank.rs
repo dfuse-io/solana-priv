@@ -37,6 +37,7 @@ use solana_sdk::{
         MAX_PROCESSING_AGE, MAX_RECENT_BLOCKHASHES, MAX_TRANSACTION_FORWARDING_DELAY,
         SECONDS_PER_DAY,
     },
+    deepmind::DMBatchContext,
     epoch_info::EpochInfo,
     epoch_schedule::EpochSchedule,
     feature,
@@ -78,7 +79,7 @@ use std::{
     collections::{HashMap, HashSet},
     convert::{TryFrom, TryInto},
     fmt, mem,
-    ops::RangeInclusive,
+    ops::{RangeInclusive, Deref},
     path::PathBuf,
     ptr,
     rc::Rc,
@@ -2433,6 +2434,7 @@ impl Bank {
             false,
             true,
             &mut ExecuteTimings::default(),
+            &None,
         );
 
         let transaction_result = executed[0].0.clone().map(|_| ());
@@ -2844,6 +2846,7 @@ impl Bank {
         enable_cpi_recording: bool,
         enable_log_recording: bool,
         timings: &mut ExecuteTimings,
+        dmbatch_context: &Option<Rc<RefCell<DMBatchContext>>>
     ) -> (
         Vec<TransactionLoadResult>,
         Vec<TransactionExecutionResult>,
@@ -2924,6 +2927,20 @@ impl Bank {
                         None
                     };
 
+                    //****************************************************************
+                    // DMLOG
+                    //****************************************************************
+                    let msg = tx.message();
+                    let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>();
+                    let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>();
+
+
+                    if let Some(ctx_ref) = &dmbatch_context {
+                        let ctx = ctx_ref.deref();
+                        ctx.borrow_mut().start_trx(sigs, msg.header.num_required_signatures, msg.header.num_readonly_signed_accounts, msg.header.num_readonly_unsigned_accounts, account_keys, msg.recent_blockhash);
+                    }
+                    //****************************************************************
+
                     let process_result = self.message_processor.process_message(
                         tx.message(),
                         &loader_refcells,
@@ -2935,6 +2952,7 @@ impl Bank {
                         instruction_recorders.as_deref(),
                         self.feature_set.clone(),
                         bpf_compute_budget,
+                        &dmbatch_context
                     );
 
                     if enable_log_recording {
@@ -2942,7 +2960,16 @@ impl Bank {
                             Rc::try_unwrap(log_collector.unwrap_or_default())
                                 .unwrap_or_default()
                                 .into();
-
+                        //****************************************************************
+                        // DMLOG
+                        //****************************************************************
+                        if let Some(ctx_ref) = &dmbatch_context {
+                            let ctx = ctx_ref.deref();
+                            for log in log_messages.clone() {
+                                ctx.borrow_mut().add_log(log);
+                            }
+                        }
+                        //****************************************************************
                         transaction_log_messages.push(log_messages);
                     }
 
@@ -3766,6 +3793,7 @@ impl Bank {
         enable_cpi_recording: bool,
         enable_log_recording: bool,
         timings: &mut ExecuteTimings,
+        dmbatch_context: &Option<Rc<RefCell<DMBatchContext>>>
     ) -> (
         TransactionResults,
         TransactionBalancesSet,
@@ -3792,6 +3820,7 @@ impl Bank {
             enable_cpi_recording,
             enable_log_recording,
             timings,
+            dmbatch_context,
         );
 
         let results = self.commit_transactions(
@@ -3826,6 +3855,7 @@ impl Bank {
             false,
             false,
             &mut ExecuteTimings::default(),
+            &None,
         )
         .0
         .fee_collection_results
@@ -7733,6 +7763,7 @@ pub(crate) mod tests {
                 false,
                 false,
                 &mut ExecuteTimings::default(),
+                None,
             )
             .0
             .fee_collection_results;
@@ -9715,6 +9746,7 @@ pub(crate) mod tests {
                 false,
                 false,
                 &mut ExecuteTimings::default(),
+                None,
             );
 
         assert!(inner_instructions[0].iter().all(|ix| ix.is_empty()));

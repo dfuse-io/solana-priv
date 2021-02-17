@@ -2925,6 +2925,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "protobuf"
+version = "2.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73f72884896d22e0da0e5b266cb9a780b791f6c3b2f5beab6368d6cd4f0dbb86"
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3037,6 +3043,12 @@ checksum = "90bde5296fc891b0cef12a6d03ddccc162ce7b2aff54160af9338f8d40df6d19"
 dependencies = [
  "getrandom 0.1.14",
 ]
+
+[[package]]
+name = "rand_core"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34cf66eb183df1c5876e2dcf6b13d57340741e8dc255b48e40a26de954d06ae7"
 
 [[package]]
 name = "rand_hc"
@@ -3894,6 +3906,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "rand 0.7.3",
+ "rand_core 0.6.2",
  "rustversion",
  "solana-runtime",
  "solana-sdk",
@@ -4067,6 +4080,7 @@ dependencies = [
  "bincode",
  "chrono",
  "log 0.4.11",
+ "rand_core 0.6.2",
  "serde",
  "serde_derive",
  "solana-logger 1.5.8",
@@ -4920,6 +4934,7 @@ dependencies = [
  "num-derive",
  "num-traits",
  "pbkdf2 0.6.0",
+ "protobuf",
  "rand 0.7.3",
  "rand_chacha 0.2.2",
  "rustc_version",

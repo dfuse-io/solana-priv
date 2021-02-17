@@ -64,6 +64,14 @@ pub trait InvokeContext {
     fn is_feature_active(&self, feature_id: &Pubkey) -> bool;
     /// Get an account from a pre-account
     fn get_account(&self, pubkey: &Pubkey) -> Option<RefCell<Account>>;
+
+    //****************************************************************
+    // DMLOG
+    //****************************************************************
+    fn dmbatch_start_instruction(&self, program_id: Pubkey, keyed_accounts: &[String], instruction_data: &[u8]);
+    fn dmbatch_end_instruction(&self);
+    //****************************************************************
+
 }
 
 /// Convenience macro to log a message with an `Rc<RefCell<dyn Logger>>`
@@ -371,4 +379,14 @@ impl InvokeContext for MockInvokeContext {
     fn get_account(&self, _pubkey: &Pubkey) -> Option<RefCell<Account>> {
         None
     }
+
+
+    //****************************************************************
+    // DMLOG
+    //****************************************************************
+    fn dmbatch_start_instruction(&self, _program_id: Pubkey, _keyed_accounts: &[String], _instruction_data: &[u8]) {
+    }
+    fn dmbatch_end_instruction(&self) {
+    }
+    //****************************************************************
 }
