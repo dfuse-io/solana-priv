@@ -77,6 +77,7 @@ solana-program = { path = "program", version = "=1.5.20" }
 solana-sdk-macro = { path = "macro", version = "=1.5.20" }
 thiserror = "1.0"
 uriparse = { version = "0.6.3", optional = true }
+protobuf = "2.20.0"
 
 [dev-dependencies]
 curve25519-dalek = "2.1.0"
