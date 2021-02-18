@@ -1642,6 +1642,8 @@ pub struct Transaction {
     pub recent_blockhash: ::std::string::String,
     pub log_messages: ::protobuf::RepeatedField<::std::string::String>,
     pub instructions: ::protobuf::RepeatedField<Instruction>,
+    pub failed: bool,
+    pub error: ::protobuf::SingularPtrField<TransactionError>,
     // special fields
     pub unknown_fields: ::protobuf::UnknownFields,
     pub cached_size: ::protobuf::CachedSize,
@@ -1898,6 +1900,54 @@ impl Transaction {
     pub fn take_instructions(&mut self) -> ::protobuf::RepeatedField<Instruction> {
         ::std::mem::replace(&mut self.instructions, ::protobuf::RepeatedField::new())
     }
+
+    // bool failed = 15;
+
+
+    pub fn get_failed(&self) -> bool {
+        self.failed
+    }
+    pub fn clear_failed(&mut self) {
+        self.failed = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_failed(&mut self, v: bool) {
+        self.failed = v;
+    }
+
+    // .dfuse.solana.codec.v1.TransactionError error = 16;
+
+
+    pub fn get_error(&self) -> &TransactionError {
+        self.error.as_ref().unwrap_or_else(|| <TransactionError as ::protobuf::Message>::default_instance())
+    }
+    pub fn clear_error(&mut self) {
+        self.error.clear();
+    }
+
+    pub fn has_error(&self) -> bool {
+        self.error.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_error(&mut self, v: TransactionError) {
+        self.error = ::protobuf::SingularPtrField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_error(&mut self) -> &mut TransactionError {
+        if self.error.is_none() {
+            self.error.set_default();
+        }
+        self.error.as_mut().unwrap()
+    }
+
+    // Take field
+    pub fn take_error(&mut self) -> TransactionError {
+        self.error.take().unwrap_or_else(|| TransactionError::new())
+    }
 }
 
 impl ::protobuf::Message for Transaction {
@@ -1908,6 +1958,11 @@ impl ::protobuf::Message for Transaction {
             }
         };
         for v in &self.instructions {
+            if !v.is_initialized() {
+                return false;
+            }
+        };
+        for v in &self.error {
             if !v.is_initialized() {
                 return false;
             }
@@ -1957,6 +2012,16 @@ impl ::protobuf::Message for Transaction {
                 13 => {
                     ::protobuf::rt::read_repeated_message_into(wire_type, is, &mut self.instructions)?;
                 },
+                15 => {
+                    if wire_type != ::protobuf::wire_format::WireTypeVarint {
+                        return ::std::result::Result::Err(::protobuf::rt::unexpected_wire_type(wire_type));
+                    }
+                    let tmp = is.read_bool()?;
+                    self.failed = tmp;
+                },
+                16 => {
+                    ::protobuf::rt::read_singular_message_into(wire_type, is, &mut self.error)?;
+                },
                 _ => {
                     ::protobuf::rt::read_unknown_or_skip_group(field_number, wire_type, is, self.mut_unknown_fields())?;
                 },
@@ -2001,6 +2066,13 @@ impl ::protobuf::Message for Transaction {
             let len = value.compute_size();
             my_size += 1 + ::protobuf::rt::compute_raw_varint32_size(len) + len;
         };
+        if self.failed != false {
+            my_size += 2;
+        }
+        if let Some(ref v) = self.error.as_ref() {
+            let len = v.compute_size();
+            my_size += 2 + ::protobuf::rt::compute_raw_varint32_size(len) + len;
+        }
         my_size += ::protobuf::rt::unknown_fields_size(self.get_unknown_fields());
         self.cached_size.set(my_size);
         my_size
@@ -2041,6 +2113,14 @@ impl ::protobuf::Message for Transaction {
             os.write_raw_varint32(v.get_cached_size())?;
             v.write_to_with_cached_sizes(os)?;
         };
+        if self.failed != false {
+            os.write_bool(15, self.failed)?;
+        }
+        if let Some(ref v) = self.error.as_ref() {
+            os.write_tag(16, ::protobuf::wire_format::WireTypeLengthDelimited)?;
+            os.write_raw_varint32(v.get_cached_size())?;
+            v.write_to_with_cached_sizes(os)?;
+        }
         os.write_unknown_fields(self.get_unknown_fields())?;
         ::std::result::Result::Ok(())
     }
@@ -2129,6 +2209,16 @@ impl ::protobuf::Message for Transaction {
                 |m: &Transaction| { &m.instructions },
                 |m: &mut Transaction| { &mut m.instructions },
             ));
+            fields.push(::protobuf::reflect::accessor::make_simple_field_accessor::<_, ::protobuf::types::ProtobufTypeBool>(
+                "failed",
+                |m: &Transaction| { &m.failed },
+                |m: &mut Transaction| { &mut m.failed },
+            ));
+            fields.push(::protobuf::reflect::accessor::make_singular_ptr_field_accessor::<_, ::protobuf::types::ProtobufTypeMessage<TransactionError>>(
+                "error",
+                |m: &Transaction| { &m.error },
+                |m: &mut Transaction| { &mut m.error },
+            ));
             ::protobuf::reflect::MessageDescriptor::new_pb_name::<Transaction>(
                 "Transaction",
                 fields,
@@ -2155,6 +2245,8 @@ impl ::protobuf::Clear for Transaction {
         self.recent_blockhash.clear();
         self.log_messages.clear();
         self.instructions.clear();
+        self.failed = false;
+        self.error.clear();
         self.unknown_fields.clear();
     }
 }
@@ -2404,6 +2496,8 @@ pub struct Instruction {
     pub depth: u32,
     pub balance_changes: ::protobuf::RepeatedField<BalanceChange>,
     pub account_changes: ::protobuf::RepeatedField<AccountChange>,
+    pub failed: bool,
+    pub error: ::protobuf::SingularPtrField<InstructionError>,
     // special fields
     pub unknown_fields: ::protobuf::UnknownFields,
     pub cached_size: ::protobuf::CachedSize,
@@ -2591,6 +2685,54 @@ impl Instruction {
     pub fn take_account_changes(&mut self) -> ::protobuf::RepeatedField<AccountChange> {
         ::std::mem::replace(&mut self.account_changes, ::protobuf::RepeatedField::new())
     }
+
+    // bool failed = 15;
+
+
+    pub fn get_failed(&self) -> bool {
+        self.failed
+    }
+    pub fn clear_failed(&mut self) {
+        self.failed = false;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_failed(&mut self, v: bool) {
+        self.failed = v;
+    }
+
+    // .dfuse.solana.codec.v1.InstructionError error = 16;
+
+
+    pub fn get_error(&self) -> &InstructionError {
+        self.error.as_ref().unwrap_or_else(|| <InstructionError as ::protobuf::Message>::default_instance())
+    }
+    pub fn clear_error(&mut self) {
+        self.error.clear();
+    }
+
+    pub fn has_error(&self) -> bool {
+        self.error.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_error(&mut self, v: InstructionError) {
+        self.error = ::protobuf::SingularPtrField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_error(&mut self) -> &mut InstructionError {
+        if self.error.is_none() {
+            self.error.set_default();
+        }
+        self.error.as_mut().unwrap()
+    }
+
+    // Take field
+    pub fn take_error(&mut self) -> InstructionError {
+        self.error.take().unwrap_or_else(|| InstructionError::new())
+    }
 }
 
 impl ::protobuf::Message for Instruction {
@@ -2601,6 +2743,11 @@ impl ::protobuf::Message for Instruction {
             }
         };
         for v in &self.account_changes {
+            if !v.is_initialized() {
+                return false;
+            }
+        };
+        for v in &self.error {
             if !v.is_initialized() {
                 return false;
             }
@@ -2648,6 +2795,16 @@ impl ::protobuf::Message for Instruction {
                 10 => {
                     ::protobuf::rt::read_repeated_message_into(wire_type, is, &mut self.account_changes)?;
                 },
+                15 => {
+                    if wire_type != ::protobuf::wire_format::WireTypeVarint {
+                        return ::std::result::Result::Err(::protobuf::rt::unexpected_wire_type(wire_type));
+                    }
+                    let tmp = is.read_bool()?;
+                    self.failed = tmp;
+                },
+                16 => {
+                    ::protobuf::rt::read_singular_message_into(wire_type, is, &mut self.error)?;
+                },
                 _ => {
                     ::protobuf::rt::read_unknown_or_skip_group(field_number, wire_type, is, self.mut_unknown_fields())?;
                 },
@@ -2686,6 +2843,13 @@ impl ::protobuf::Message for Instruction {
             let len = value.compute_size();
             my_size += 1 + ::protobuf::rt::compute_raw_varint32_size(len) + len;
         };
+        if self.failed != false {
+            my_size += 2;
+        }
+        if let Some(ref v) = self.error.as_ref() {
+            let len = v.compute_size();
+            my_size += 2 + ::protobuf::rt::compute_raw_varint32_size(len) + len;
+        }
         my_size += ::protobuf::rt::unknown_fields_size(self.get_unknown_fields());
         self.cached_size.set(my_size);
         my_size
@@ -2720,6 +2884,14 @@ impl ::protobuf::Message for Instruction {
             os.write_raw_varint32(v.get_cached_size())?;
             v.write_to_with_cached_sizes(os)?;
         };
+        if self.failed != false {
+            os.write_bool(15, self.failed)?;
+        }
+        if let Some(ref v) = self.error.as_ref() {
+            os.write_tag(16, ::protobuf::wire_format::WireTypeLengthDelimited)?;
+            os.write_raw_varint32(v.get_cached_size())?;
+            v.write_to_with_cached_sizes(os)?;
+        }
         os.write_unknown_fields(self.get_unknown_fields())?;
         ::std::result::Result::Ok(())
     }
@@ -2798,6 +2970,16 @@ impl ::protobuf::Message for Instruction {
                 |m: &Instruction| { &m.account_changes },
                 |m: &mut Instruction| { &mut m.account_changes },
             ));
+            fields.push(::protobuf::reflect::accessor::make_simple_field_accessor::<_, ::protobuf::types::ProtobufTypeBool>(
+                "failed",
+                |m: &Instruction| { &m.failed },
+                |m: &mut Instruction| { &mut m.failed },
+            ));
+            fields.push(::protobuf::reflect::accessor::make_singular_ptr_field_accessor::<_, ::protobuf::types::ProtobufTypeMessage<InstructionError>>(
+                "error",
+                |m: &Instruction| { &m.error },
+                |m: &mut Instruction| { &mut m.error },
+            ));
             ::protobuf::reflect::MessageDescriptor::new_pb_name::<Instruction>(
                 "Instruction",
                 fields,
@@ -2822,6 +3004,8 @@ impl ::protobuf::Clear for Instruction {
         self.depth = 0;
         self.balance_changes.clear();
         self.account_changes.clear();
+        self.failed = false;
+        self.error.clear();
         self.unknown_fields.clear();
     }
 }
@@ -3345,194 +3529,1288 @@ impl ::protobuf::reflect::ProtobufValue for AccountChange {
     }
 }
 
+#[derive(PartialEq,Clone,Default)]
+pub struct TransactionError {
+    // message fields
+    pub field_type: TransactionErrorType,
+    pub payload: ::protobuf::SingularPtrField<::protobuf::well_known_types::Any>,
+    // special fields
+    pub unknown_fields: ::protobuf::UnknownFields,
+    pub cached_size: ::protobuf::CachedSize,
+}
+
+impl<'a> ::std::default::Default for &'a TransactionError {
+    fn default() -> &'a TransactionError {
+        <TransactionError as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl TransactionError {
+    pub fn new() -> TransactionError {
+        ::std::default::Default::default()
+    }
+
+    // .dfuse.solana.codec.v1.TransactionErrorType type = 1;
+
+
+    pub fn get_field_type(&self) -> TransactionErrorType {
+        self.field_type
+    }
+    pub fn clear_field_type(&mut self) {
+        self.field_type = TransactionErrorType::ACCOUNT_IN_USE;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_field_type(&mut self, v: TransactionErrorType) {
+        self.field_type = v;
+    }
+
+    // .google.protobuf.Any payload = 2;
+
+
+    pub fn get_payload(&self) -> &::protobuf::well_known_types::Any {
+        self.payload.as_ref().unwrap_or_else(|| <::protobuf::well_known_types::Any as ::protobuf::Message>::default_instance())
+    }
+    pub fn clear_payload(&mut self) {
+        self.payload.clear();
+    }
+
+    pub fn has_payload(&self) -> bool {
+        self.payload.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_payload(&mut self, v: ::protobuf::well_known_types::Any) {
+        self.payload = ::protobuf::SingularPtrField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_payload(&mut self) -> &mut ::protobuf::well_known_types::Any {
+        if self.payload.is_none() {
+            self.payload.set_default();
+        }
+        self.payload.as_mut().unwrap()
+    }
+
+    // Take field
+    pub fn take_payload(&mut self) -> ::protobuf::well_known_types::Any {
+        self.payload.take().unwrap_or_else(|| ::protobuf::well_known_types::Any::new())
+    }
+}
+
+impl ::protobuf::Message for TransactionError {
+    fn is_initialized(&self) -> bool {
+        for v in &self.payload {
+            if !v.is_initialized() {
+                return false;
+            }
+        };
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::ProtobufResult<()> {
+        while !is.eof()? {
+            let (field_number, wire_type) = is.read_tag_unpack()?;
+            match field_number {
+                1 => {
+                    ::protobuf::rt::read_proto3_enum_with_unknown_fields_into(wire_type, is, &mut self.field_type, 1, &mut self.unknown_fields)?
+                },
+                2 => {
+                    ::protobuf::rt::read_singular_message_into(wire_type, is, &mut self.payload)?;
+                },
+                _ => {
+                    ::protobuf::rt::read_unknown_or_skip_group(field_number, wire_type, is, self.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u32 {
+        let mut my_size = 0;
+        if self.field_type != TransactionErrorType::ACCOUNT_IN_USE {
+            my_size += ::protobuf::rt::enum_size(1, self.field_type);
+        }
+        if let Some(ref v) = self.payload.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint32_size(len) + len;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.get_unknown_fields());
+        self.cached_size.set(my_size);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::ProtobufResult<()> {
+        if self.field_type != TransactionErrorType::ACCOUNT_IN_USE {
+            os.write_enum(1, ::protobuf::ProtobufEnum::value(&self.field_type))?;
+        }
+        if let Some(ref v) = self.payload.as_ref() {
+            os.write_tag(2, ::protobuf::wire_format::WireTypeLengthDelimited)?;
+            os.write_raw_varint32(v.get_cached_size())?;
+            v.write_to_with_cached_sizes(os)?;
+        }
+        os.write_unknown_fields(self.get_unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn get_cached_size(&self) -> u32 {
+        self.cached_size.get()
+    }
+
+    fn get_unknown_fields(&self) -> &::protobuf::UnknownFields {
+        &self.unknown_fields
+    }
+
+    fn mut_unknown_fields(&mut self) -> &mut ::protobuf::UnknownFields {
+        &mut self.unknown_fields
+    }
+
+    fn as_any(&self) -> &dyn (::std::any::Any) {
+        self as &dyn (::std::any::Any)
+    }
+    fn as_any_mut(&mut self) -> &mut dyn (::std::any::Any) {
+        self as &mut dyn (::std::any::Any)
+    }
+    fn into_any(self: ::std::boxed::Box<Self>) -> ::std::boxed::Box<dyn (::std::any::Any)> {
+        self
+    }
+
+    fn descriptor(&self) -> &'static ::protobuf::reflect::MessageDescriptor {
+        Self::descriptor_static()
+    }
+
+    fn new() -> TransactionError {
+        TransactionError::new()
+    }
+
+    fn descriptor_static() -> &'static ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::LazyV2<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::LazyV2::INIT;
+        descriptor.get(|| {
+            let mut fields = ::std::vec::Vec::new();
+            fields.push(::protobuf::reflect::accessor::make_simple_field_accessor::<_, ::protobuf::types::ProtobufTypeEnum<TransactionErrorType>>(
+                "type",
+                |m: &TransactionError| { &m.field_type },
+                |m: &mut TransactionError| { &mut m.field_type },
+            ));
+            fields.push(::protobuf::reflect::accessor::make_singular_ptr_field_accessor::<_, ::protobuf::types::ProtobufTypeMessage<::protobuf::well_known_types::Any>>(
+                "payload",
+                |m: &TransactionError| { &m.payload },
+                |m: &mut TransactionError| { &mut m.payload },
+            ));
+            ::protobuf::reflect::MessageDescriptor::new_pb_name::<TransactionError>(
+                "TransactionError",
+                fields,
+                file_descriptor_proto()
+            )
+        })
+    }
+
+    fn default_instance() -> &'static TransactionError {
+        static instance: ::protobuf::rt::LazyV2<TransactionError> = ::protobuf::rt::LazyV2::INIT;
+        instance.get(TransactionError::new)
+    }
+}
+
+impl ::protobuf::Clear for TransactionError {
+    fn clear(&mut self) {
+        self.field_type = TransactionErrorType::ACCOUNT_IN_USE;
+        self.payload.clear();
+        self.unknown_fields.clear();
+    }
+}
+
+impl ::std::fmt::Debug for TransactionError {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for TransactionError {
+    fn as_ref(&self) -> ::protobuf::reflect::ReflectValueRef {
+        ::protobuf::reflect::ReflectValueRef::Message(self)
+    }
+}
+
+#[derive(PartialEq,Clone,Default)]
+pub struct TransactionInstructionError {
+    // message fields
+    pub Index: u32,
+    pub error: ::protobuf::SingularPtrField<InstructionError>,
+    // special fields
+    pub unknown_fields: ::protobuf::UnknownFields,
+    pub cached_size: ::protobuf::CachedSize,
+}
+
+impl<'a> ::std::default::Default for &'a TransactionInstructionError {
+    fn default() -> &'a TransactionInstructionError {
+        <TransactionInstructionError as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl TransactionInstructionError {
+    pub fn new() -> TransactionInstructionError {
+        ::std::default::Default::default()
+    }
+
+    // uint32 Index = 1;
+
+
+    pub fn get_Index(&self) -> u32 {
+        self.Index
+    }
+    pub fn clear_Index(&mut self) {
+        self.Index = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_Index(&mut self, v: u32) {
+        self.Index = v;
+    }
+
+    // .dfuse.solana.codec.v1.InstructionError error = 2;
+
+
+    pub fn get_error(&self) -> &InstructionError {
+        self.error.as_ref().unwrap_or_else(|| <InstructionError as ::protobuf::Message>::default_instance())
+    }
+    pub fn clear_error(&mut self) {
+        self.error.clear();
+    }
+
+    pub fn has_error(&self) -> bool {
+        self.error.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_error(&mut self, v: InstructionError) {
+        self.error = ::protobuf::SingularPtrField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_error(&mut self) -> &mut InstructionError {
+        if self.error.is_none() {
+            self.error.set_default();
+        }
+        self.error.as_mut().unwrap()
+    }
+
+    // Take field
+    pub fn take_error(&mut self) -> InstructionError {
+        self.error.take().unwrap_or_else(|| InstructionError::new())
+    }
+}
+
+impl ::protobuf::Message for TransactionInstructionError {
+    fn is_initialized(&self) -> bool {
+        for v in &self.error {
+            if !v.is_initialized() {
+                return false;
+            }
+        };
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::ProtobufResult<()> {
+        while !is.eof()? {
+            let (field_number, wire_type) = is.read_tag_unpack()?;
+            match field_number {
+                1 => {
+                    if wire_type != ::protobuf::wire_format::WireTypeVarint {
+                        return ::std::result::Result::Err(::protobuf::rt::unexpected_wire_type(wire_type));
+                    }
+                    let tmp = is.read_uint32()?;
+                    self.Index = tmp;
+                },
+                2 => {
+                    ::protobuf::rt::read_singular_message_into(wire_type, is, &mut self.error)?;
+                },
+                _ => {
+                    ::protobuf::rt::read_unknown_or_skip_group(field_number, wire_type, is, self.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u32 {
+        let mut my_size = 0;
+        if self.Index != 0 {
+            my_size += ::protobuf::rt::value_size(1, self.Index, ::protobuf::wire_format::WireTypeVarint);
+        }
+        if let Some(ref v) = self.error.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint32_size(len) + len;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.get_unknown_fields());
+        self.cached_size.set(my_size);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::ProtobufResult<()> {
+        if self.Index != 0 {
+            os.write_uint32(1, self.Index)?;
+        }
+        if let Some(ref v) = self.error.as_ref() {
+            os.write_tag(2, ::protobuf::wire_format::WireTypeLengthDelimited)?;
+            os.write_raw_varint32(v.get_cached_size())?;
+            v.write_to_with_cached_sizes(os)?;
+        }
+        os.write_unknown_fields(self.get_unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn get_cached_size(&self) -> u32 {
+        self.cached_size.get()
+    }
+
+    fn get_unknown_fields(&self) -> &::protobuf::UnknownFields {
+        &self.unknown_fields
+    }
+
+    fn mut_unknown_fields(&mut self) -> &mut ::protobuf::UnknownFields {
+        &mut self.unknown_fields
+    }
+
+    fn as_any(&self) -> &dyn (::std::any::Any) {
+        self as &dyn (::std::any::Any)
+    }
+    fn as_any_mut(&mut self) -> &mut dyn (::std::any::Any) {
+        self as &mut dyn (::std::any::Any)
+    }
+    fn into_any(self: ::std::boxed::Box<Self>) -> ::std::boxed::Box<dyn (::std::any::Any)> {
+        self
+    }
+
+    fn descriptor(&self) -> &'static ::protobuf::reflect::MessageDescriptor {
+        Self::descriptor_static()
+    }
+
+    fn new() -> TransactionInstructionError {
+        TransactionInstructionError::new()
+    }
+
+    fn descriptor_static() -> &'static ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::LazyV2<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::LazyV2::INIT;
+        descriptor.get(|| {
+            let mut fields = ::std::vec::Vec::new();
+            fields.push(::protobuf::reflect::accessor::make_simple_field_accessor::<_, ::protobuf::types::ProtobufTypeUint32>(
+                "Index",
+                |m: &TransactionInstructionError| { &m.Index },
+                |m: &mut TransactionInstructionError| { &mut m.Index },
+            ));
+            fields.push(::protobuf::reflect::accessor::make_singular_ptr_field_accessor::<_, ::protobuf::types::ProtobufTypeMessage<InstructionError>>(
+                "error",
+                |m: &TransactionInstructionError| { &m.error },
+                |m: &mut TransactionInstructionError| { &mut m.error },
+            ));
+            ::protobuf::reflect::MessageDescriptor::new_pb_name::<TransactionInstructionError>(
+                "TransactionInstructionError",
+                fields,
+                file_descriptor_proto()
+            )
+        })
+    }
+
+    fn default_instance() -> &'static TransactionInstructionError {
+        static instance: ::protobuf::rt::LazyV2<TransactionInstructionError> = ::protobuf::rt::LazyV2::INIT;
+        instance.get(TransactionInstructionError::new)
+    }
+}
+
+impl ::protobuf::Clear for TransactionInstructionError {
+    fn clear(&mut self) {
+        self.Index = 0;
+        self.error.clear();
+        self.unknown_fields.clear();
+    }
+}
+
+impl ::std::fmt::Debug for TransactionInstructionError {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for TransactionInstructionError {
+    fn as_ref(&self) -> ::protobuf::reflect::ReflectValueRef {
+        ::protobuf::reflect::ReflectValueRef::Message(self)
+    }
+}
+
+#[derive(PartialEq,Clone,Default)]
+pub struct InstructionError {
+    // message fields
+    pub field_type: InstructionErrorType,
+    pub payload: ::protobuf::SingularPtrField<::protobuf::well_known_types::Any>,
+    // special fields
+    pub unknown_fields: ::protobuf::UnknownFields,
+    pub cached_size: ::protobuf::CachedSize,
+}
+
+impl<'a> ::std::default::Default for &'a InstructionError {
+    fn default() -> &'a InstructionError {
+        <InstructionError as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl InstructionError {
+    pub fn new() -> InstructionError {
+        ::std::default::Default::default()
+    }
+
+    // .dfuse.solana.codec.v1.InstructionErrorType type = 2;
+
+
+    pub fn get_field_type(&self) -> InstructionErrorType {
+        self.field_type
+    }
+    pub fn clear_field_type(&mut self) {
+        self.field_type = InstructionErrorType::GENERIC_ERROR;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_field_type(&mut self, v: InstructionErrorType) {
+        self.field_type = v;
+    }
+
+    // .google.protobuf.Any payload = 3;
+
+
+    pub fn get_payload(&self) -> &::protobuf::well_known_types::Any {
+        self.payload.as_ref().unwrap_or_else(|| <::protobuf::well_known_types::Any as ::protobuf::Message>::default_instance())
+    }
+    pub fn clear_payload(&mut self) {
+        self.payload.clear();
+    }
+
+    pub fn has_payload(&self) -> bool {
+        self.payload.is_some()
+    }
+
+    // Param is passed by value, moved
+    pub fn set_payload(&mut self, v: ::protobuf::well_known_types::Any) {
+        self.payload = ::protobuf::SingularPtrField::some(v);
+    }
+
+    // Mutable pointer to the field.
+    // If field is not initialized, it is initialized with default value first.
+    pub fn mut_payload(&mut self) -> &mut ::protobuf::well_known_types::Any {
+        if self.payload.is_none() {
+            self.payload.set_default();
+        }
+        self.payload.as_mut().unwrap()
+    }
+
+    // Take field
+    pub fn take_payload(&mut self) -> ::protobuf::well_known_types::Any {
+        self.payload.take().unwrap_or_else(|| ::protobuf::well_known_types::Any::new())
+    }
+}
+
+impl ::protobuf::Message for InstructionError {
+    fn is_initialized(&self) -> bool {
+        for v in &self.payload {
+            if !v.is_initialized() {
+                return false;
+            }
+        };
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::ProtobufResult<()> {
+        while !is.eof()? {
+            let (field_number, wire_type) = is.read_tag_unpack()?;
+            match field_number {
+                2 => {
+                    ::protobuf::rt::read_proto3_enum_with_unknown_fields_into(wire_type, is, &mut self.field_type, 2, &mut self.unknown_fields)?
+                },
+                3 => {
+                    ::protobuf::rt::read_singular_message_into(wire_type, is, &mut self.payload)?;
+                },
+                _ => {
+                    ::protobuf::rt::read_unknown_or_skip_group(field_number, wire_type, is, self.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u32 {
+        let mut my_size = 0;
+        if self.field_type != InstructionErrorType::GENERIC_ERROR {
+            my_size += ::protobuf::rt::enum_size(2, self.field_type);
+        }
+        if let Some(ref v) = self.payload.as_ref() {
+            let len = v.compute_size();
+            my_size += 1 + ::protobuf::rt::compute_raw_varint32_size(len) + len;
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.get_unknown_fields());
+        self.cached_size.set(my_size);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::ProtobufResult<()> {
+        if self.field_type != InstructionErrorType::GENERIC_ERROR {
+            os.write_enum(2, ::protobuf::ProtobufEnum::value(&self.field_type))?;
+        }
+        if let Some(ref v) = self.payload.as_ref() {
+            os.write_tag(3, ::protobuf::wire_format::WireTypeLengthDelimited)?;
+            os.write_raw_varint32(v.get_cached_size())?;
+            v.write_to_with_cached_sizes(os)?;
+        }
+        os.write_unknown_fields(self.get_unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn get_cached_size(&self) -> u32 {
+        self.cached_size.get()
+    }
+
+    fn get_unknown_fields(&self) -> &::protobuf::UnknownFields {
+        &self.unknown_fields
+    }
+
+    fn mut_unknown_fields(&mut self) -> &mut ::protobuf::UnknownFields {
+        &mut self.unknown_fields
+    }
+
+    fn as_any(&self) -> &dyn (::std::any::Any) {
+        self as &dyn (::std::any::Any)
+    }
+    fn as_any_mut(&mut self) -> &mut dyn (::std::any::Any) {
+        self as &mut dyn (::std::any::Any)
+    }
+    fn into_any(self: ::std::boxed::Box<Self>) -> ::std::boxed::Box<dyn (::std::any::Any)> {
+        self
+    }
+
+    fn descriptor(&self) -> &'static ::protobuf::reflect::MessageDescriptor {
+        Self::descriptor_static()
+    }
+
+    fn new() -> InstructionError {
+        InstructionError::new()
+    }
+
+    fn descriptor_static() -> &'static ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::LazyV2<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::LazyV2::INIT;
+        descriptor.get(|| {
+            let mut fields = ::std::vec::Vec::new();
+            fields.push(::protobuf::reflect::accessor::make_simple_field_accessor::<_, ::protobuf::types::ProtobufTypeEnum<InstructionErrorType>>(
+                "type",
+                |m: &InstructionError| { &m.field_type },
+                |m: &mut InstructionError| { &mut m.field_type },
+            ));
+            fields.push(::protobuf::reflect::accessor::make_singular_ptr_field_accessor::<_, ::protobuf::types::ProtobufTypeMessage<::protobuf::well_known_types::Any>>(
+                "payload",
+                |m: &InstructionError| { &m.payload },
+                |m: &mut InstructionError| { &mut m.payload },
+            ));
+            ::protobuf::reflect::MessageDescriptor::new_pb_name::<InstructionError>(
+                "InstructionError",
+                fields,
+                file_descriptor_proto()
+            )
+        })
+    }
+
+    fn default_instance() -> &'static InstructionError {
+        static instance: ::protobuf::rt::LazyV2<InstructionError> = ::protobuf::rt::LazyV2::INIT;
+        instance.get(InstructionError::new)
+    }
+}
+
+impl ::protobuf::Clear for InstructionError {
+    fn clear(&mut self) {
+        self.field_type = InstructionErrorType::GENERIC_ERROR;
+        self.payload.clear();
+        self.unknown_fields.clear();
+    }
+}
+
+impl ::std::fmt::Debug for InstructionError {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for InstructionError {
+    fn as_ref(&self) -> ::protobuf::reflect::ReflectValueRef {
+        ::protobuf::reflect::ReflectValueRef::Message(self)
+    }
+}
+
+#[derive(PartialEq,Clone,Default)]
+pub struct InstructionErrorCustom {
+    // message fields
+    pub id: u32,
+    // special fields
+    pub unknown_fields: ::protobuf::UnknownFields,
+    pub cached_size: ::protobuf::CachedSize,
+}
+
+impl<'a> ::std::default::Default for &'a InstructionErrorCustom {
+    fn default() -> &'a InstructionErrorCustom {
+        <InstructionErrorCustom as ::protobuf::Message>::default_instance()
+    }
+}
+
+impl InstructionErrorCustom {
+    pub fn new() -> InstructionErrorCustom {
+        ::std::default::Default::default()
+    }
+
+    // uint32 id = 1;
+
+
+    pub fn get_id(&self) -> u32 {
+        self.id
+    }
+    pub fn clear_id(&mut self) {
+        self.id = 0;
+    }
+
+    // Param is passed by value, moved
+    pub fn set_id(&mut self, v: u32) {
+        self.id = v;
+    }
+}
+
+impl ::protobuf::Message for InstructionErrorCustom {
+    fn is_initialized(&self) -> bool {
+        true
+    }
+
+    fn merge_from(&mut self, is: &mut ::protobuf::CodedInputStream<'_>) -> ::protobuf::ProtobufResult<()> {
+        while !is.eof()? {
+            let (field_number, wire_type) = is.read_tag_unpack()?;
+            match field_number {
+                1 => {
+                    if wire_type != ::protobuf::wire_format::WireTypeVarint {
+                        return ::std::result::Result::Err(::protobuf::rt::unexpected_wire_type(wire_type));
+                    }
+                    let tmp = is.read_uint32()?;
+                    self.id = tmp;
+                },
+                _ => {
+                    ::protobuf::rt::read_unknown_or_skip_group(field_number, wire_type, is, self.mut_unknown_fields())?;
+                },
+            };
+        }
+        ::std::result::Result::Ok(())
+    }
+
+    // Compute sizes of nested messages
+    #[allow(unused_variables)]
+    fn compute_size(&self) -> u32 {
+        let mut my_size = 0;
+        if self.id != 0 {
+            my_size += ::protobuf::rt::value_size(1, self.id, ::protobuf::wire_format::WireTypeVarint);
+        }
+        my_size += ::protobuf::rt::unknown_fields_size(self.get_unknown_fields());
+        self.cached_size.set(my_size);
+        my_size
+    }
+
+    fn write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream<'_>) -> ::protobuf::ProtobufResult<()> {
+        if self.id != 0 {
+            os.write_uint32(1, self.id)?;
+        }
+        os.write_unknown_fields(self.get_unknown_fields())?;
+        ::std::result::Result::Ok(())
+    }
+
+    fn get_cached_size(&self) -> u32 {
+        self.cached_size.get()
+    }
+
+    fn get_unknown_fields(&self) -> &::protobuf::UnknownFields {
+        &self.unknown_fields
+    }
+
+    fn mut_unknown_fields(&mut self) -> &mut ::protobuf::UnknownFields {
+        &mut self.unknown_fields
+    }
+
+    fn as_any(&self) -> &dyn (::std::any::Any) {
+        self as &dyn (::std::any::Any)
+    }
+    fn as_any_mut(&mut self) -> &mut dyn (::std::any::Any) {
+        self as &mut dyn (::std::any::Any)
+    }
+    fn into_any(self: ::std::boxed::Box<Self>) -> ::std::boxed::Box<dyn (::std::any::Any)> {
+        self
+    }
+
+    fn descriptor(&self) -> &'static ::protobuf::reflect::MessageDescriptor {
+        Self::descriptor_static()
+    }
+
+    fn new() -> InstructionErrorCustom {
+        InstructionErrorCustom::new()
+    }
+
+    fn descriptor_static() -> &'static ::protobuf::reflect::MessageDescriptor {
+        static descriptor: ::protobuf::rt::LazyV2<::protobuf::reflect::MessageDescriptor> = ::protobuf::rt::LazyV2::INIT;
+        descriptor.get(|| {
+            let mut fields = ::std::vec::Vec::new();
+            fields.push(::protobuf::reflect::accessor::make_simple_field_accessor::<_, ::protobuf::types::ProtobufTypeUint32>(
+                "id",
+                |m: &InstructionErrorCustom| { &m.id },
+                |m: &mut InstructionErrorCustom| { &mut m.id },
+            ));
+            ::protobuf::reflect::MessageDescriptor::new_pb_name::<InstructionErrorCustom>(
+                "InstructionErrorCustom",
+                fields,
+                file_descriptor_proto()
+            )
+        })
+    }
+
+    fn default_instance() -> &'static InstructionErrorCustom {
+        static instance: ::protobuf::rt::LazyV2<InstructionErrorCustom> = ::protobuf::rt::LazyV2::INIT;
+        instance.get(InstructionErrorCustom::new)
+    }
+}
+
+impl ::protobuf::Clear for InstructionErrorCustom {
+    fn clear(&mut self) {
+        self.id = 0;
+        self.unknown_fields.clear();
+    }
+}
+
+impl ::std::fmt::Debug for InstructionErrorCustom {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        ::protobuf::text_format::fmt(self, f)
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for InstructionErrorCustom {
+    fn as_ref(&self) -> ::protobuf::reflect::ReflectValueRef {
+        ::protobuf::reflect::ReflectValueRef::Message(self)
+    }
+}
+
+#[derive(Clone,PartialEq,Eq,Debug,Hash)]
+pub enum TransactionErrorType {
+    ACCOUNT_IN_USE = 0,
+    ACCOUNT_LOADED_TWICE = 1,
+    ACCOUNT_NOT_FOUND = 2,
+    PROGRAM_ACCOUNT_NOT_FOUND = 3,
+    INSUFFICIENT_FUNDS_FOR_FEE = 4,
+    INVALID_ACCOUNT_FOR_FEE = 5,
+    DUPLICATE_SIGNATURE = 6,
+    BLOCKHASH_NOT_FOUND = 7,
+    INSTRUCTION_ERROR = 8,
+    CALL_CHAIN_TOO_DEEP = 9,
+    MISSING_SIGNATURE_FOR_FEE = 10,
+    INVALID_ACCOUNT_INDEX = 11,
+    SIGNATURE_FAILURE = 12,
+    INVALID_PROGRAM_FOR_EXECUTION = 13,
+    SANITIZE_FAILURE = 14,
+    CLUSTER_MAINTENANCE = 15,
+}
+
+impl ::protobuf::ProtobufEnum for TransactionErrorType {
+    fn value(&self) -> i32 {
+        *self as i32
+    }
+
+    fn from_i32(value: i32) -> ::std::option::Option<TransactionErrorType> {
+        match value {
+            0 => ::std::option::Option::Some(TransactionErrorType::ACCOUNT_IN_USE),
+            1 => ::std::option::Option::Some(TransactionErrorType::ACCOUNT_LOADED_TWICE),
+            2 => ::std::option::Option::Some(TransactionErrorType::ACCOUNT_NOT_FOUND),
+            3 => ::std::option::Option::Some(TransactionErrorType::PROGRAM_ACCOUNT_NOT_FOUND),
+            4 => ::std::option::Option::Some(TransactionErrorType::INSUFFICIENT_FUNDS_FOR_FEE),
+            5 => ::std::option::Option::Some(TransactionErrorType::INVALID_ACCOUNT_FOR_FEE),
+            6 => ::std::option::Option::Some(TransactionErrorType::DUPLICATE_SIGNATURE),
+            7 => ::std::option::Option::Some(TransactionErrorType::BLOCKHASH_NOT_FOUND),
+            8 => ::std::option::Option::Some(TransactionErrorType::INSTRUCTION_ERROR),
+            9 => ::std::option::Option::Some(TransactionErrorType::CALL_CHAIN_TOO_DEEP),
+            10 => ::std::option::Option::Some(TransactionErrorType::MISSING_SIGNATURE_FOR_FEE),
+            11 => ::std::option::Option::Some(TransactionErrorType::INVALID_ACCOUNT_INDEX),
+            12 => ::std::option::Option::Some(TransactionErrorType::SIGNATURE_FAILURE),
+            13 => ::std::option::Option::Some(TransactionErrorType::INVALID_PROGRAM_FOR_EXECUTION),
+            14 => ::std::option::Option::Some(TransactionErrorType::SANITIZE_FAILURE),
+            15 => ::std::option::Option::Some(TransactionErrorType::CLUSTER_MAINTENANCE),
+            _ => ::std::option::Option::None
+        }
+    }
+
+    fn values() -> &'static [Self] {
+        static values: &'static [TransactionErrorType] = &[
+            TransactionErrorType::ACCOUNT_IN_USE,
+            TransactionErrorType::ACCOUNT_LOADED_TWICE,
+            TransactionErrorType::ACCOUNT_NOT_FOUND,
+            TransactionErrorType::PROGRAM_ACCOUNT_NOT_FOUND,
+            TransactionErrorType::INSUFFICIENT_FUNDS_FOR_FEE,
+            TransactionErrorType::INVALID_ACCOUNT_FOR_FEE,
+            TransactionErrorType::DUPLICATE_SIGNATURE,
+            TransactionErrorType::BLOCKHASH_NOT_FOUND,
+            TransactionErrorType::INSTRUCTION_ERROR,
+            TransactionErrorType::CALL_CHAIN_TOO_DEEP,
+            TransactionErrorType::MISSING_SIGNATURE_FOR_FEE,
+            TransactionErrorType::INVALID_ACCOUNT_INDEX,
+            TransactionErrorType::SIGNATURE_FAILURE,
+            TransactionErrorType::INVALID_PROGRAM_FOR_EXECUTION,
+            TransactionErrorType::SANITIZE_FAILURE,
+            TransactionErrorType::CLUSTER_MAINTENANCE,
+        ];
+        values
+    }
+
+    fn enum_descriptor_static() -> &'static ::protobuf::reflect::EnumDescriptor {
+        static descriptor: ::protobuf::rt::LazyV2<::protobuf::reflect::EnumDescriptor> = ::protobuf::rt::LazyV2::INIT;
+        descriptor.get(|| {
+            ::protobuf::reflect::EnumDescriptor::new_pb_name::<TransactionErrorType>("TransactionErrorType", file_descriptor_proto())
+        })
+    }
+}
+
+impl ::std::marker::Copy for TransactionErrorType {
+}
+
+impl ::std::default::Default for TransactionErrorType {
+    fn default() -> Self {
+        TransactionErrorType::ACCOUNT_IN_USE
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for TransactionErrorType {
+    fn as_ref(&self) -> ::protobuf::reflect::ReflectValueRef {
+        ::protobuf::reflect::ReflectValueRef::Enum(::protobuf::ProtobufEnum::descriptor(self))
+    }
+}
+
+#[derive(Clone,PartialEq,Eq,Debug,Hash)]
+pub enum InstructionErrorType {
+    GENERIC_ERROR = 0,
+    INVALID_ARGUMENT = 1,
+    INVALID_INSTRUCTION_DATA = 2,
+    INVALID_ACCOUNT_DATA = 3,
+    ACCOUNT_DATA_TOO_SMALL = 4,
+    INSUFFICIENT_FUNDS = 5,
+    INCORRECT_PROGRAM_ID = 6,
+    MISSING_REQUIRED_SIGNATURE = 7,
+    ACCOUNT_ALREADY_INITIALIZED = 8,
+    UNINITIALIZED_ACCOUNT = 9,
+    UNBALANCED_INSTRUCTION = 10,
+    MODIFIED_PROGRAM_ID = 11,
+    EXTERNAL_ACCOUNT_LAMPORT_SPEND = 12,
+    EXTERNAL_ACCOUNT_DATA_MODIFIED = 13,
+    READONLY_LAMPORT_CHANGE = 14,
+    READONLY_DATA_MODIFIED = 15,
+    DUPLICATE_ACCOUNT_INDEX = 16,
+    EXECUTABLE_MODIFIED = 17,
+    RENT_EPOCH_MODIFIED = 18,
+    NOT_ENOUGH_ACCOUNT_KEYS = 19,
+    ACCOUNT_DATA_SIZE_CHANGED = 20,
+    ACCOUNT_NOT_EXECUTABLE = 21,
+    ACCOUNT_BORROW_FAILED = 22,
+    ACCOUNT_BORROW_OUTSTANDING = 23,
+    DUPLICATE_ACCOUNT_OUT_OF_SYNC = 24,
+    CUSTOM = 25,
+    INVALID_ERROR = 26,
+    EXECUTABLE_DATA_MODIFIED = 27,
+    EXECUTABLE_LAMPORT_CHANGE = 28,
+    EXECUTABLE_ACCOUNT_NOT_RENT_EXEMPT = 29,
+    UNSUPPORTED_PROGRAM_ID = 30,
+    CALL_DEPTH = 31,
+    MISSING_ACCOUNT = 32,
+    REENTRANCY_NOT_ALLOWED = 33,
+    MAX_SEED_LENGTH_EXCEEDED = 34,
+    INVALID_SEEDS = 35,
+    INVALID_REALLOC = 36,
+    COMPUTATIONAL_BUDGET_EXCEEDED = 37,
+    PRIVILEGE_ESCALATION = 38,
+    PROGRAM_ENVIRONMENT_SETUP_FAILURE = 39,
+    PROGRAM_FAILED_TO_COMPLETE = 40,
+    PROGRAM_FAILED_TO_COMPILE = 41,
+    IMMUTABLE = 42,
+    INCORRECT_AUTHORITY = 43,
+}
+
+impl ::protobuf::ProtobufEnum for InstructionErrorType {
+    fn value(&self) -> i32 {
+        *self as i32
+    }
+
+    fn from_i32(value: i32) -> ::std::option::Option<InstructionErrorType> {
+        match value {
+            0 => ::std::option::Option::Some(InstructionErrorType::GENERIC_ERROR),
+            1 => ::std::option::Option::Some(InstructionErrorType::INVALID_ARGUMENT),
+            2 => ::std::option::Option::Some(InstructionErrorType::INVALID_INSTRUCTION_DATA),
+            3 => ::std::option::Option::Some(InstructionErrorType::INVALID_ACCOUNT_DATA),
+            4 => ::std::option::Option::Some(InstructionErrorType::ACCOUNT_DATA_TOO_SMALL),
+            5 => ::std::option::Option::Some(InstructionErrorType::INSUFFICIENT_FUNDS),
+            6 => ::std::option::Option::Some(InstructionErrorType::INCORRECT_PROGRAM_ID),
+            7 => ::std::option::Option::Some(InstructionErrorType::MISSING_REQUIRED_SIGNATURE),
+            8 => ::std::option::Option::Some(InstructionErrorType::ACCOUNT_ALREADY_INITIALIZED),
+            9 => ::std::option::Option::Some(InstructionErrorType::UNINITIALIZED_ACCOUNT),
+            10 => ::std::option::Option::Some(InstructionErrorType::UNBALANCED_INSTRUCTION),
+            11 => ::std::option::Option::Some(InstructionErrorType::MODIFIED_PROGRAM_ID),
+            12 => ::std::option::Option::Some(InstructionErrorType::EXTERNAL_ACCOUNT_LAMPORT_SPEND),
+            13 => ::std::option::Option::Some(InstructionErrorType::EXTERNAL_ACCOUNT_DATA_MODIFIED),
+            14 => ::std::option::Option::Some(InstructionErrorType::READONLY_LAMPORT_CHANGE),
+            15 => ::std::option::Option::Some(InstructionErrorType::READONLY_DATA_MODIFIED),
+            16 => ::std::option::Option::Some(InstructionErrorType::DUPLICATE_ACCOUNT_INDEX),
+            17 => ::std::option::Option::Some(InstructionErrorType::EXECUTABLE_MODIFIED),
+            18 => ::std::option::Option::Some(InstructionErrorType::RENT_EPOCH_MODIFIED),
+            19 => ::std::option::Option::Some(InstructionErrorType::NOT_ENOUGH_ACCOUNT_KEYS),
+            20 => ::std::option::Option::Some(InstructionErrorType::ACCOUNT_DATA_SIZE_CHANGED),
+            21 => ::std::option::Option::Some(InstructionErrorType::ACCOUNT_NOT_EXECUTABLE),
+            22 => ::std::option::Option::Some(InstructionErrorType::ACCOUNT_BORROW_FAILED),
+            23 => ::std::option::Option::Some(InstructionErrorType::ACCOUNT_BORROW_OUTSTANDING),
+            24 => ::std::option::Option::Some(InstructionErrorType::DUPLICATE_ACCOUNT_OUT_OF_SYNC),
+            25 => ::std::option::Option::Some(InstructionErrorType::CUSTOM),
+            26 => ::std::option::Option::Some(InstructionErrorType::INVALID_ERROR),
+            27 => ::std::option::Option::Some(InstructionErrorType::EXECUTABLE_DATA_MODIFIED),
+            28 => ::std::option::Option::Some(InstructionErrorType::EXECUTABLE_LAMPORT_CHANGE),
+            29 => ::std::option::Option::Some(InstructionErrorType::EXECUTABLE_ACCOUNT_NOT_RENT_EXEMPT),
+            30 => ::std::option::Option::Some(InstructionErrorType::UNSUPPORTED_PROGRAM_ID),
+            31 => ::std::option::Option::Some(InstructionErrorType::CALL_DEPTH),
+            32 => ::std::option::Option::Some(InstructionErrorType::MISSING_ACCOUNT),
+            33 => ::std::option::Option::Some(InstructionErrorType::REENTRANCY_NOT_ALLOWED),
+            34 => ::std::option::Option::Some(InstructionErrorType::MAX_SEED_LENGTH_EXCEEDED),
+            35 => ::std::option::Option::Some(InstructionErrorType::INVALID_SEEDS),
+            36 => ::std::option::Option::Some(InstructionErrorType::INVALID_REALLOC),
+            37 => ::std::option::Option::Some(InstructionErrorType::COMPUTATIONAL_BUDGET_EXCEEDED),
+            38 => ::std::option::Option::Some(InstructionErrorType::PRIVILEGE_ESCALATION),
+            39 => ::std::option::Option::Some(InstructionErrorType::PROGRAM_ENVIRONMENT_SETUP_FAILURE),
+            40 => ::std::option::Option::Some(InstructionErrorType::PROGRAM_FAILED_TO_COMPLETE),
+            41 => ::std::option::Option::Some(InstructionErrorType::PROGRAM_FAILED_TO_COMPILE),
+            42 => ::std::option::Option::Some(InstructionErrorType::IMMUTABLE),
+            43 => ::std::option::Option::Some(InstructionErrorType::INCORRECT_AUTHORITY),
+            _ => ::std::option::Option::None
+        }
+    }
+
+    fn values() -> &'static [Self] {
+        static values: &'static [InstructionErrorType] = &[
+            InstructionErrorType::GENERIC_ERROR,
+            InstructionErrorType::INVALID_ARGUMENT,
+            InstructionErrorType::INVALID_INSTRUCTION_DATA,
+            InstructionErrorType::INVALID_ACCOUNT_DATA,
+            InstructionErrorType::ACCOUNT_DATA_TOO_SMALL,
+            InstructionErrorType::INSUFFICIENT_FUNDS,
+            InstructionErrorType::INCORRECT_PROGRAM_ID,
+            InstructionErrorType::MISSING_REQUIRED_SIGNATURE,
+            InstructionErrorType::ACCOUNT_ALREADY_INITIALIZED,
+            InstructionErrorType::UNINITIALIZED_ACCOUNT,
+            InstructionErrorType::UNBALANCED_INSTRUCTION,
+            InstructionErrorType::MODIFIED_PROGRAM_ID,
+            InstructionErrorType::EXTERNAL_ACCOUNT_LAMPORT_SPEND,
+            InstructionErrorType::EXTERNAL_ACCOUNT_DATA_MODIFIED,
+            InstructionErrorType::READONLY_LAMPORT_CHANGE,
+            InstructionErrorType::READONLY_DATA_MODIFIED,
+            InstructionErrorType::DUPLICATE_ACCOUNT_INDEX,
+            InstructionErrorType::EXECUTABLE_MODIFIED,
+            InstructionErrorType::RENT_EPOCH_MODIFIED,
+            InstructionErrorType::NOT_ENOUGH_ACCOUNT_KEYS,
+            InstructionErrorType::ACCOUNT_DATA_SIZE_CHANGED,
+            InstructionErrorType::ACCOUNT_NOT_EXECUTABLE,
+            InstructionErrorType::ACCOUNT_BORROW_FAILED,
+            InstructionErrorType::ACCOUNT_BORROW_OUTSTANDING,
+            InstructionErrorType::DUPLICATE_ACCOUNT_OUT_OF_SYNC,
+            InstructionErrorType::CUSTOM,
+            InstructionErrorType::INVALID_ERROR,
+            InstructionErrorType::EXECUTABLE_DATA_MODIFIED,
+            InstructionErrorType::EXECUTABLE_LAMPORT_CHANGE,
+            InstructionErrorType::EXECUTABLE_ACCOUNT_NOT_RENT_EXEMPT,
+            InstructionErrorType::UNSUPPORTED_PROGRAM_ID,
+            InstructionErrorType::CALL_DEPTH,
+            InstructionErrorType::MISSING_ACCOUNT,
+            InstructionErrorType::REENTRANCY_NOT_ALLOWED,
+            InstructionErrorType::MAX_SEED_LENGTH_EXCEEDED,
+            InstructionErrorType::INVALID_SEEDS,
+            InstructionErrorType::INVALID_REALLOC,
+            InstructionErrorType::COMPUTATIONAL_BUDGET_EXCEEDED,
+            InstructionErrorType::PRIVILEGE_ESCALATION,
+            InstructionErrorType::PROGRAM_ENVIRONMENT_SETUP_FAILURE,
+            InstructionErrorType::PROGRAM_FAILED_TO_COMPLETE,
+            InstructionErrorType::PROGRAM_FAILED_TO_COMPILE,
+            InstructionErrorType::IMMUTABLE,
+            InstructionErrorType::INCORRECT_AUTHORITY,
+        ];
+        values
+    }
+
+    fn enum_descriptor_static() -> &'static ::protobuf::reflect::EnumDescriptor {
+        static descriptor: ::protobuf::rt::LazyV2<::protobuf::reflect::EnumDescriptor> = ::protobuf::rt::LazyV2::INIT;
+        descriptor.get(|| {
+            ::protobuf::reflect::EnumDescriptor::new_pb_name::<InstructionErrorType>("InstructionErrorType", file_descriptor_proto())
+        })
+    }
+}
+
+impl ::std::marker::Copy for InstructionErrorType {
+}
+
+impl ::std::default::Default for InstructionErrorType {
+    fn default() -> Self {
+        InstructionErrorType::GENERIC_ERROR
+    }
+}
+
+impl ::protobuf::reflect::ProtobufValue for InstructionErrorType {
+    fn as_ref(&self) -> ::protobuf::reflect::ReflectValueRef {
+        ::protobuf::reflect::ReflectValueRef::Enum(::protobuf::ProtobufEnum::descriptor(self))
+    }
+}
+
 static file_descriptor_proto_data: &'static [u8] = b"\
-    \n!dfuse/solana/codec/v1/codec.proto\x12\x15dfuse.solana.codec.v1\"\x86\
-    \x03\n\x04Slot\x12\x0e\n\x02id\x18\x01\x20\x01(\tR\x02id\x12\x16\n\x06nu\
-    mber\x18\x02\x20\x01(\x04R\x06number\x12\x1f\n\x0bprevious_id\x18\x03\
-    \x20\x01(\tR\npreviousId\x12\x18\n\x07version\x18\x04\x20\x01(\rR\x07ver\
-    sion\x122\n\x05block\x18\x05\x20\x01(\x0b2\x1c.dfuse.solana.codec.v1.Blo\
-    ckR\x05block\x12F\n\x0ctransactions\x18\x07\x20\x03(\x0b2\".dfuse.solana\
-    .codec.v1.TransactionR\x0ctransactions\x12+\n\x11transaction_count\x18\
-    \x08\x20\x01(\rR\x10transactionCount\x129\n\x19has_split_account_changes\
-    \x18\t\x20\x01(\x08R\x16hasSplitAccountChanges\x127\n\x18account_changes\
-    _file_ref\x18\n\x20\x01(\tR\x15accountChangesFileRef\"\x9b\x02\n\x05Bloc\
-    k\x12\x0e\n\x02id\x18\x01\x20\x01(\tR\x02id\x12\x16\n\x06number\x18\x02\
-    \x20\x01(\x04R\x06number\x12\x16\n\x06height\x18\x03\x20\x01(\x04R\x06he\
-    ight\x12\x1f\n\x0bprevious_id\x18\x04\x20\x01(\tR\npreviousId\x12.\n\x13\
-    previous_block_slot\x18\x05\x20\x01(\x04R\x11previousBlockSlot\x124\n\
-    \x16genesis_unix_timestamp\x18\x06\x20\x01(\x04R\x14genesisUnixTimestamp\
-    \x120\n\x14clock_unix_timestamp\x18\x07\x20\x01(\x04R\x12clockUnixTimest\
-    amp\x12\x19\n\x08root_num\x18\x08\x20\x01(\x04R\x07rootNum\"O\n\x05Batch\
-    \x12F\n\x0ctransactions\x18\x01\x20\x03(\x0b2\".dfuse.solana.codec.v1.Tr\
-    ansactionR\x0ctransactions\"l\n\x14AccountChangesBundle\x12T\n\x0ctransa\
-    ctions\x18\x01\x20\x03(\x0b20.dfuse.solana.codec.v1.AccountChangesPerTrx\
-    IndexR\x0ctransactions\"\x8a\x01\n\x19AccountChangesPerTrxIndex\x12\x14\
-    \n\x05TrxId\x18\x01\x20\x01(\tR\x05TrxId\x12W\n\x0cinstructions\x18\x02\
-    \x20\x03(\x0b23.dfuse.solana.codec.v1.AccountChangesPerInstructionR\x0ci\
-    nstructions\"^\n\x1cAccountChangesPerInstruction\x12>\n\x07changes\x18\
-    \x01\x20\x03(\x0b2$.dfuse.solana.codec.v1.AccountChangeR\x07changes\"\
-    \x97\x03\n\x0bTransaction\x12\x0e\n\x02id\x18\x01\x20\x01(\tR\x02id\x12\
-    \x19\n\x08slot_num\x18\x02\x20\x01(\x04R\x07slotNum\x12\x1b\n\tslot_hash\
-    \x18\x03\x20\x01(\tR\x08slotHash\x12\x14\n\x05index\x18\x04\x20\x01(\x04\
-    R\x05index\x123\n\x15additional_signatures\x18\x05\x20\x03(\tR\x14additi\
-    onalSignatures\x12<\n\x06header\x18\x06\x20\x01(\x0b2$.dfuse.solana.code\
-    c.v1.MessageHeaderR\x06header\x12!\n\x0caccount_keys\x18\x07\x20\x03(\tR\
-    \x0baccountKeys\x12)\n\x10recent_blockhash\x18\x08\x20\x01(\tR\x0frecent\
-    Blockhash\x12!\n\x0clog_messages\x18\x0c\x20\x03(\tR\x0blogMessages\x12F\
-    \n\x0cinstructions\x18\r\x20\x03(\x0b2\".dfuse.solana.codec.v1.Instructi\
-    onR\x0cinstructions\"\xcd\x01\n\rMessageHeader\x126\n\x17num_required_si\
-    gnatures\x18\x01\x20\x01(\rR\x15numRequiredSignatures\x12?\n\x1cnum_read\
-    only_signed_accounts\x18\x02\x20\x01(\rR\x19numReadonlySignedAccounts\
-    \x12C\n\x1enum_readonly_unsigned_accounts\x18\x03\x20\x01(\rR\x1bnumRead\
-    onlyUnsignedAccounts\"\xd8\x02\n\x0bInstruction\x12\x1d\n\nprogram_id\
-    \x18\x03\x20\x01(\tR\tprogramId\x12!\n\x0caccount_keys\x18\x04\x20\x03(\
-    \tR\x0baccountKeys\x12\x12\n\x04data\x18\x05\x20\x01(\x0cR\x04data\x12\
-    \x18\n\x07ordinal\x18\x06\x20\x01(\rR\x07ordinal\x12%\n\x0eparent_ordina\
-    l\x18\x07\x20\x01(\rR\rparentOrdinal\x12\x14\n\x05depth\x18\x08\x20\x01(\
-    \rR\x05depth\x12M\n\x0fbalance_changes\x18\t\x20\x03(\x0b2$.dfuse.solana\
-    .codec.v1.BalanceChangeR\x0ebalanceChanges\x12M\n\x0faccount_changes\x18\
-    \n\x20\x03(\x0b2$.dfuse.solana.codec.v1.AccountChangeR\x0eaccountChanges\
-    \"o\n\rBalanceChange\x12\x16\n\x06pubkey\x18\x01\x20\x01(\tR\x06pubkey\
-    \x12#\n\rprev_lamports\x18\x02\x20\x01(\x04R\x0cprevLamports\x12!\n\x0cn\
-    ew_lamports\x18\x03\x20\x01(\x04R\x0bnewLamports\"\x87\x01\n\rAccountCha\
-    nge\x12\x16\n\x06pubkey\x18\x01\x20\x01(\tR\x06pubkey\x12\x1b\n\tprev_da\
-    ta\x18\x02\x20\x01(\x0cR\x08prevData\x12\x19\n\x08new_data\x18\x03\x20\
-    \x01(\x0cR\x07newData\x12&\n\x0fnew_data_length\x18\x04\x20\x01(\x04R\rn\
-    ewDataLengthBCZAgithub.com/dfuse-io/dfuse-solana/pb/dfuse/solana/codec/v\
-    1;pbcodecJ\x97&\n\x06\x12\x04\0\0\x7f\x01\n\x08\n\x01\x0c\x12\x03\0\0\
-    \x12\n\x08\n\x01\x02\x12\x03\x02\0\x1e\n\x08\n\x01\x08\x12\x03\x03\0X\n\
-    \t\n\x02\x08\x0b\x12\x03\x03\0X\n\n\n\x02\x04\0\x12\x04\x05\0\x11\x01\n\
-    \n\n\x03\x04\0\x01\x12\x03\x05\x08\x0c\n6\n\x04\x04\0\x02\0\x12\x03\x06\
-    \x02\x10\")\x20hash\x20of\x20the\x20last\x20Entry\x20closing\x20the\x20s\
-    lot\n\n\x0c\n\x05\x04\0\x02\0\x05\x12\x03\x06\x02\x08\n\x0c\n\x05\x04\0\
-    \x02\0\x01\x12\x03\x06\t\x0b\n\x0c\n\x05\x04\0\x02\0\x03\x12\x03\x06\x0e\
-    \x0f\n,\n\x04\x04\0\x02\x01\x12\x03\x07\x02\x14\"\x1f\x20slot\x20number,\
-    \x20not\x20block\x20number\n\n\x0c\n\x05\x04\0\x02\x01\x05\x12\x03\x07\
-    \x02\x08\n\x0c\n\x05\x04\0\x02\x01\x01\x12\x03\x07\t\x0f\n\x0c\n\x05\x04\
-    \0\x02\x01\x03\x12\x03\x07\x12\x13\n4\n\x04\x04\0\x02\x02\x12\x03\x08\
-    \x02\x19\"'\x20corresponds\x20to\x20the\x20previous\x20SLOT\x20hash\n\n\
-    \x0c\n\x05\x04\0\x02\x02\x05\x12\x03\x08\x02\x08\n\x0c\n\x05\x04\0\x02\
-    \x02\x01\x12\x03\x08\t\x14\n\x0c\n\x05\x04\0\x02\x02\x03\x12\x03\x08\x17\
-    \x18\n\x0b\n\x04\x04\0\x02\x03\x12\x03\t\x02\x15\n\x0c\n\x05\x04\0\x02\
-    \x03\x05\x12\x03\t\x02\x08\n\x0c\n\x05\x04\0\x02\x03\x01\x12\x03\t\t\x10\
-    \n\x0c\n\x05\x04\0\x02\x03\x03\x12\x03\t\x13\x14\n\x0b\n\x04\x04\0\x02\
-    \x04\x12\x03\n\x02\x12\n\x0c\n\x05\x04\0\x02\x04\x06\x12\x03\n\x02\x07\n\
-    \x0c\n\x05\x04\0\x02\x04\x01\x12\x03\n\x08\r\n\x0c\n\x05\x04\0\x02\x04\
-    \x03\x12\x03\n\x10\x11\n\x0b\n\x04\x04\0\x02\x05\x12\x03\x0c\x02(\n\x0c\
-    \n\x05\x04\0\x02\x05\x04\x12\x03\x0c\x02\n\n\x0c\n\x05\x04\0\x02\x05\x06\
-    \x12\x03\x0c\x0b\x16\n\x0c\n\x05\x04\0\x02\x05\x01\x12\x03\x0c\x17#\n\
-    \x0c\n\x05\x04\0\x02\x05\x03\x12\x03\x0c&'\n\x0b\n\x04\x04\0\x02\x06\x12\
-    \x03\r\x02\x1f\n\x0c\n\x05\x04\0\x02\x06\x05\x12\x03\r\x02\x08\n\x0c\n\
-    \x05\x04\0\x02\x06\x01\x12\x03\r\t\x1a\n\x0c\n\x05\x04\0\x02\x06\x03\x12\
-    \x03\r\x1d\x1e\n\x0b\n\x04\x04\0\x02\x07\x12\x03\x0f\x02%\n\x0c\n\x05\
-    \x04\0\x02\x07\x05\x12\x03\x0f\x02\x06\n\x0c\n\x05\x04\0\x02\x07\x01\x12\
-    \x03\x0f\x07\x20\n\x0c\n\x05\x04\0\x02\x07\x03\x12\x03\x0f#$\n\x0b\n\x04\
-    \x04\0\x02\x08\x12\x03\x10\x02'\n\x0c\n\x05\x04\0\x02\x08\x05\x12\x03\
-    \x10\x02\x08\n\x0c\n\x05\x04\0\x02\x08\x01\x12\x03\x10\t!\n\x0c\n\x05\
-    \x04\0\x02\x08\x03\x12\x03\x10$&\n\n\n\x02\x04\x01\x12\x04\x13\0\x1c\x01\
-    \n\n\n\x03\x04\x01\x01\x12\x03\x13\x08\r\n3\n\x04\x04\x01\x02\0\x12\x03\
-    \x14\x02\x10\"&\x20corresponds\x20to\x20the\x20Slot\x20id\x20(or\x20hash\
-    )\n\n\x0c\n\x05\x04\x01\x02\0\x05\x12\x03\x14\x02\x08\n\x0c\n\x05\x04\
-    \x01\x02\0\x01\x12\x03\x14\t\x0b\n\x0c\n\x05\x04\x01\x02\0\x03\x12\x03\
-    \x14\x0e\x0f\n<\n\x04\x04\x01\x02\x01\x12\x03\x15\x02\x14\"/\x20correspo\
-    nds\x20to\x20the\x20Slot\x20number\x20for\x20this\x20block\n\n\x0c\n\x05\
-    \x04\x01\x02\x01\x05\x12\x03\x15\x02\x08\n\x0c\n\x05\x04\x01\x02\x01\x01\
-    \x12\x03\x15\t\x0f\n\x0c\n\x05\x04\x01\x02\x01\x03\x12\x03\x15\x12\x13\n\
-    \x0b\n\x04\x04\x01\x02\x02\x12\x03\x16\x02\x14\n\x0c\n\x05\x04\x01\x02\
-    \x02\x05\x12\x03\x16\x02\x08\n\x0c\n\x05\x04\x01\x02\x02\x01\x12\x03\x16\
-    \t\x0f\n\x0c\n\x05\x04\x01\x02\x02\x03\x12\x03\x16\x12\x13\nV\n\x04\x04\
-    \x01\x02\x03\x12\x03\x17\x02\x19\"I\x20corresponds\x20to\x20the\x20previ\
-    ous_blockhash,\x20might\x20skip\x20some\x20slots,\x20so\x20beware\n\n\
-    \x0c\n\x05\x04\x01\x02\x03\x05\x12\x03\x17\x02\x08\n\x0c\n\x05\x04\x01\
-    \x02\x03\x01\x12\x03\x17\t\x14\n\x0c\n\x05\x04\x01\x02\x03\x03\x12\x03\
-    \x17\x17\x18\n\x0b\n\x04\x04\x01\x02\x04\x12\x03\x18\x02!\n\x0c\n\x05\
-    \x04\x01\x02\x04\x05\x12\x03\x18\x02\x08\n\x0c\n\x05\x04\x01\x02\x04\x01\
-    \x12\x03\x18\t\x1c\n\x0c\n\x05\x04\x01\x02\x04\x03\x12\x03\x18\x1f\x20\n\
-    \x0b\n\x04\x04\x01\x02\x05\x12\x03\x19\x02$\n\x0c\n\x05\x04\x01\x02\x05\
-    \x05\x12\x03\x19\x02\x08\n\x0c\n\x05\x04\x01\x02\x05\x01\x12\x03\x19\t\
-    \x1f\n\x0c\n\x05\x04\x01\x02\x05\x03\x12\x03\x19\"#\n\x0b\n\x04\x04\x01\
-    \x02\x06\x12\x03\x1a\x02\"\n\x0c\n\x05\x04\x01\x02\x06\x05\x12\x03\x1a\
-    \x02\x08\n\x0c\n\x05\x04\x01\x02\x06\x01\x12\x03\x1a\t\x1d\n\x0c\n\x05\
-    \x04\x01\x02\x06\x03\x12\x03\x1a\x20!\n\x0b\n\x04\x04\x01\x02\x07\x12\
-    \x03\x1b\x02\x16\n\x0c\n\x05\x04\x01\x02\x07\x05\x12\x03\x1b\x02\x08\n\
-    \x0c\n\x05\x04\x01\x02\x07\x01\x12\x03\x1b\t\x11\n\x0c\n\x05\x04\x01\x02\
-    \x07\x03\x12\x03\x1b\x14\x15\n\n\n\x02\x04\x02\x12\x04\x1e\0\x20\x01\n\n\
-    \n\x03\x04\x02\x01\x12\x03\x1e\x08\r\n\x0b\n\x04\x04\x02\x02\0\x12\x03\
-    \x1f\x02(\n\x0c\n\x05\x04\x02\x02\0\x04\x12\x03\x1f\x02\n\n\x0c\n\x05\
-    \x04\x02\x02\0\x06\x12\x03\x1f\x0b\x16\n\x0c\n\x05\x04\x02\x02\0\x01\x12\
-    \x03\x1f\x17#\n\x0c\n\x05\x04\x02\x02\0\x03\x12\x03\x1f&'\nQ\n\x02\x04\
-    \x03\x12\x04#\0&\x01\x1aE\x20Bundled\x20in\x20separate\x20files,\x20refe\
-    renced\x20by\x20`account_changes_file_ref`\n\n\n\n\x03\x04\x03\x01\x12\
-    \x03#\x08\x1c\nP\n\x04\x04\x03\x02\0\x12\x03%\x026\x1aC\x20Maps\x20to\
-    \x20the\x20index\x20of\x20the\x20`repeated`\x20field\x20for\x20Block::tr\
-    ansactions\n\n\x0c\n\x05\x04\x03\x02\0\x04\x12\x03%\x02\n\n\x0c\n\x05\
-    \x04\x03\x02\0\x06\x12\x03%\x0b$\n\x0c\n\x05\x04\x03\x02\0\x01\x12\x03%%\
-    1\n\x0c\n\x05\x04\x03\x02\0\x03\x12\x03%45\n\n\n\x02\x04\x04\x12\x04(\0.\
-    \x01\n\n\n\x03\x04\x04\x01\x12\x03(\x08!\n\x0b\n\x04\x04\x04\x02\0\x12\
-    \x03)\x02\x13\n\x0c\n\x05\x04\x04\x02\0\x05\x12\x03)\x02\x08\n\x0c\n\x05\
-    \x04\x04\x02\0\x01\x12\x03)\t\x0e\n\x0c\n\x05\x04\x04\x02\0\x03\x12\x03)\
-    \x11\x12\nh\n\x04\x04\x04\x02\x01\x12\x03-\x029\x1a[\x20Maps\x20to\x20th\
-    e\x20index\x20within\x20the\x20`repeated`\x20field\x20of\x20the\x20proto\
-    \x20for\n\x20Transaction::instructions\n\n\x0c\n\x05\x04\x04\x02\x01\x04\
-    \x12\x03-\x02\n\n\x0c\n\x05\x04\x04\x02\x01\x06\x12\x03-\x0b'\n\x0c\n\
-    \x05\x04\x04\x02\x01\x01\x12\x03-(4\n\x0c\n\x05\x04\x04\x02\x01\x03\x12\
-    \x03-78\n\n\n\x02\x04\x05\x12\x040\03\x01\n\n\n\x03\x04\x05\x01\x12\x030\
-    \x08$\n=\n\x04\x04\x05\x02\0\x12\x032\x02%\x1a0\x20Data\x20to\x20be\x20p\
-    ut\x20in\x20Instruction::account_changes\n\n\x0c\n\x05\x04\x05\x02\0\x04\
-    \x12\x032\x02\n\n\x0c\n\x05\x04\x05\x02\0\x06\x12\x032\x0b\x18\n\x0c\n\
-    \x05\x04\x05\x02\0\x01\x12\x032\x19\x20\n\x0c\n\x05\x04\x05\x02\0\x03\
-    \x12\x032#$\n\n\n\x02\x04\x06\x12\x045\0P\x01\n\n\n\x03\x04\x06\x01\x12\
-    \x035\x08\x13\n~\n\x04\x04\x06\x02\0\x12\x038\x02\x10\x1aq\x20The\x20tra\
-    nsaction\x20ID\x20corresponds\x20to\x20the\x20_first_\n\x20signature.\
-    \x20Additional\x20signatures\x20are\x20in\x20`additional_signatures`.\n\
-    \n\x0c\n\x05\x04\x06\x02\0\x05\x12\x038\x02\x08\n\x0c\n\x05\x04\x06\x02\
-    \0\x01\x12\x038\t\x0b\n\x0c\n\x05\x04\x06\x02\0\x03\x12\x038\x0e\x0f\nC\
-    \n\x04\x04\x06\x02\x01\x12\x03;\x02\x16\x1a6\x20slot_num\x20could\x20be\
-    \x20zero\x20for\x20non-executed\x20transactions\n\n\x0c\n\x05\x04\x06\
-    \x02\x01\x05\x12\x03;\x02\x08\n\x0c\n\x05\x04\x06\x02\x01\x01\x12\x03;\t\
-    \x11\n\x0c\n\x05\x04\x06\x02\x01\x03\x12\x03;\x14\x15\nE\n\x04\x04\x06\
-    \x02\x02\x12\x03=\x02\x17\x1a8\x20slot_hash\x20could\x20be\x20empty\x20f\
-    or\x20non-executed\x20transactions\n\n\x0c\n\x05\x04\x06\x02\x02\x05\x12\
-    \x03=\x02\x08\n\x0c\n\x05\x04\x06\x02\x02\x01\x12\x03=\t\x12\n\x0c\n\x05\
-    \x04\x06\x02\x02\x03\x12\x03=\x15\x16\n\xc2\x01\n\x04\x04\x06\x02\x03\
-    \x12\x03B\x02\x13\x1a\xb4\x01\x20Index\x20from\x20within\x20a\x20single\
-    \x20Slot,\x20deterministically\x20ordered\x20to\x20the\n\x20best\x20of\
-    \x20our\x20ability\x20using\x20the\x20transaction\x20ID\x20as\x20a\x20so\
-    rt\x20key\x20for\n\x20the\x20batch\x20of\x20transactions\x20executed\x20\
-    in\x20parallel.\n\n\x0c\n\x05\x04\x06\x02\x03\x05\x12\x03B\x02\x08\n\x0c\
-    \n\x05\x04\x06\x02\x03\x01\x12\x03B\t\x0e\n\x0c\n\x05\x04\x06\x02\x03\
-    \x03\x12\x03B\x11\x12\n\x0b\n\x04\x04\x06\x02\x04\x12\x03D\x02,\n\x0c\n\
-    \x05\x04\x06\x02\x04\x04\x12\x03D\x02\n\n\x0c\n\x05\x04\x06\x02\x04\x05\
-    \x12\x03D\x0b\x11\n\x0c\n\x05\x04\x06\x02\x04\x01\x12\x03D\x12'\n\x0c\n\
-    \x05\x04\x06\x02\x04\x03\x12\x03D*+\n\x0b\n\x04\x04\x06\x02\x05\x12\x03F\
-    \x02\x1b\n\x0c\n\x05\x04\x06\x02\x05\x06\x12\x03F\x02\x0f\n\x0c\n\x05\
-    \x04\x06\x02\x05\x01\x12\x03F\x10\x16\n\x0c\n\x05\x04\x06\x02\x05\x03\
-    \x12\x03F\x19\x1a\n/\n\x04\x04\x06\x02\x06\x12\x03H\x02#\x1a\"\x20From\
-    \x20the\x20original\x20Message\x20object\n\n\x0c\n\x05\x04\x06\x02\x06\
-    \x04\x12\x03H\x02\n\n\x0c\n\x05\x04\x06\x02\x06\x05\x12\x03H\x0b\x11\n\
-    \x0c\n\x05\x04\x06\x02\x06\x01\x12\x03H\x12\x1e\n\x0c\n\x05\x04\x06\x02\
-    \x06\x03\x12\x03H!\"\n/\n\x04\x04\x06\x02\x07\x12\x03J\x02\x1e\x1a\"\x20\
-    From\x20the\x20original\x20Message\x20object\n\n\x0c\n\x05\x04\x06\x02\
-    \x07\x05\x12\x03J\x02\x08\n\x0c\n\x05\x04\x06\x02\x07\x01\x12\x03J\t\x19\
-    \n\x0c\n\x05\x04\x06\x02\x07\x03\x12\x03J\x1c\x1d\n;\n\x04\x04\x06\x02\
-    \x08\x12\x03M\x02$\x1a.\x20What\x20follows\x20Once\x20executed\x20these\
-    \x20can\x20be\x20set:\n\n\x0c\n\x05\x04\x06\x02\x08\x04\x12\x03M\x02\n\n\
-    \x0c\n\x05\x04\x06\x02\x08\x05\x12\x03M\x0b\x11\n\x0c\n\x05\x04\x06\x02\
-    \x08\x01\x12\x03M\x12\x1e\n\x0c\n\x05\x04\x06\x02\x08\x03\x12\x03M!#\nN\
-    \n\x04\x04\x06\x02\t\x12\x03O\x02)\x1aA\x20Instructions,\x20containing\
-    \x20both\x20top-level\x20and\x20nested\x20transactions\n\n\x0c\n\x05\x04\
-    \x06\x02\t\x04\x12\x03O\x02\n\n\x0c\n\x05\x04\x06\x02\t\x06\x12\x03O\x0b\
-    \x16\n\x0c\n\x05\x04\x06\x02\t\x01\x12\x03O\x17#\n\x0c\n\x05\x04\x06\x02\
-    \t\x03\x12\x03O&(\n\n\n\x02\x04\x07\x12\x04R\0V\x01\n\n\n\x03\x04\x07\
-    \x01\x12\x03R\x08\x15\n\x0b\n\x04\x04\x07\x02\0\x12\x03S\x02%\n\x0c\n\
-    \x05\x04\x07\x02\0\x05\x12\x03S\x02\x08\n\x0c\n\x05\x04\x07\x02\0\x01\
-    \x12\x03S\t\x20\n\x0c\n\x05\x04\x07\x02\0\x03\x12\x03S#$\n\x0b\n\x04\x04\
-    \x07\x02\x01\x12\x03T\x02*\n\x0c\n\x05\x04\x07\x02\x01\x05\x12\x03T\x02\
-    \x08\n\x0c\n\x05\x04\x07\x02\x01\x01\x12\x03T\t%\n\x0c\n\x05\x04\x07\x02\
-    \x01\x03\x12\x03T()\n\x0b\n\x04\x04\x07\x02\x02\x12\x03U\x02,\n\x0c\n\
-    \x05\x04\x07\x02\x02\x05\x12\x03U\x02\x08\n\x0c\n\x05\x04\x07\x02\x02\
-    \x01\x12\x03U\t'\n\x0c\n\x05\x04\x07\x02\x02\x03\x12\x03U*+\n\x9f\x03\n\
-    \x02\x04\x08\x12\x04e\0r\x012\x92\x03*\n-\x20instr1\x20(id=1,\x20parent=\
+    \n!dfuse/solana/codec/v1/codec.proto\x12\x15dfuse.solana.codec.v1\x1a\
+    \x19google/protobuf/any.proto\"\x86\x03\n\x04Slot\x12\x0e\n\x02id\x18\
+    \x01\x20\x01(\tR\x02id\x12\x16\n\x06number\x18\x02\x20\x01(\x04R\x06numb\
+    er\x12\x1f\n\x0bprevious_id\x18\x03\x20\x01(\tR\npreviousId\x12\x18\n\
+    \x07version\x18\x04\x20\x01(\rR\x07version\x122\n\x05block\x18\x05\x20\
+    \x01(\x0b2\x1c.dfuse.solana.codec.v1.BlockR\x05block\x12F\n\x0ctransacti\
+    ons\x18\x07\x20\x03(\x0b2\".dfuse.solana.codec.v1.TransactionR\x0ctransa\
+    ctions\x12+\n\x11transaction_count\x18\x08\x20\x01(\rR\x10transactionCou\
+    nt\x129\n\x19has_split_account_changes\x18\t\x20\x01(\x08R\x16hasSplitAc\
+    countChanges\x127\n\x18account_changes_file_ref\x18\n\x20\x01(\tR\x15acc\
+    ountChangesFileRef\"\x9b\x02\n\x05Block\x12\x0e\n\x02id\x18\x01\x20\x01(\
+    \tR\x02id\x12\x16\n\x06number\x18\x02\x20\x01(\x04R\x06number\x12\x16\n\
+    \x06height\x18\x03\x20\x01(\x04R\x06height\x12\x1f\n\x0bprevious_id\x18\
+    \x04\x20\x01(\tR\npreviousId\x12.\n\x13previous_block_slot\x18\x05\x20\
+    \x01(\x04R\x11previousBlockSlot\x124\n\x16genesis_unix_timestamp\x18\x06\
+    \x20\x01(\x04R\x14genesisUnixTimestamp\x120\n\x14clock_unix_timestamp\
+    \x18\x07\x20\x01(\x04R\x12clockUnixTimestamp\x12\x19\n\x08root_num\x18\
+    \x08\x20\x01(\x04R\x07rootNum\"O\n\x05Batch\x12F\n\x0ctransactions\x18\
+    \x01\x20\x03(\x0b2\".dfuse.solana.codec.v1.TransactionR\x0ctransactions\
+    \"l\n\x14AccountChangesBundle\x12T\n\x0ctransactions\x18\x01\x20\x03(\
+    \x0b20.dfuse.solana.codec.v1.AccountChangesPerTrxIndexR\x0ctransactions\
+    \"\x8a\x01\n\x19AccountChangesPerTrxIndex\x12\x14\n\x05TrxId\x18\x01\x20\
+    \x01(\tR\x05TrxId\x12W\n\x0cinstructions\x18\x02\x20\x03(\x0b23.dfuse.so\
+    lana.codec.v1.AccountChangesPerInstructionR\x0cinstructions\"^\n\x1cAcco\
+    untChangesPerInstruction\x12>\n\x07changes\x18\x01\x20\x03(\x0b2$.dfuse.\
+    solana.codec.v1.AccountChangeR\x07changes\"\xee\x03\n\x0bTransaction\x12\
+    \x0e\n\x02id\x18\x01\x20\x01(\tR\x02id\x12\x19\n\x08slot_num\x18\x02\x20\
+    \x01(\x04R\x07slotNum\x12\x1b\n\tslot_hash\x18\x03\x20\x01(\tR\x08slotHa\
+    sh\x12\x14\n\x05index\x18\x04\x20\x01(\x04R\x05index\x123\n\x15additiona\
+    l_signatures\x18\x05\x20\x03(\tR\x14additionalSignatures\x12<\n\x06heade\
+    r\x18\x06\x20\x01(\x0b2$.dfuse.solana.codec.v1.MessageHeaderR\x06header\
+    \x12!\n\x0caccount_keys\x18\x07\x20\x03(\tR\x0baccountKeys\x12)\n\x10rec\
+    ent_blockhash\x18\x08\x20\x01(\tR\x0frecentBlockhash\x12!\n\x0clog_messa\
+    ges\x18\x0c\x20\x03(\tR\x0blogMessages\x12F\n\x0cinstructions\x18\r\x20\
+    \x03(\x0b2\".dfuse.solana.codec.v1.InstructionR\x0cinstructions\x12\x16\
+    \n\x06failed\x18\x0f\x20\x01(\x08R\x06failed\x12=\n\x05error\x18\x10\x20\
+    \x01(\x0b2'.dfuse.solana.codec.v1.TransactionErrorR\x05error\"\xcd\x01\n\
+    \rMessageHeader\x126\n\x17num_required_signatures\x18\x01\x20\x01(\rR\
+    \x15numRequiredSignatures\x12?\n\x1cnum_readonly_signed_accounts\x18\x02\
+    \x20\x01(\rR\x19numReadonlySignedAccounts\x12C\n\x1enum_readonly_unsigne\
+    d_accounts\x18\x03\x20\x01(\rR\x1bnumReadonlyUnsignedAccounts\"\xaf\x03\
+    \n\x0bInstruction\x12\x1d\n\nprogram_id\x18\x03\x20\x01(\tR\tprogramId\
+    \x12!\n\x0caccount_keys\x18\x04\x20\x03(\tR\x0baccountKeys\x12\x12\n\x04\
+    data\x18\x05\x20\x01(\x0cR\x04data\x12\x18\n\x07ordinal\x18\x06\x20\x01(\
+    \rR\x07ordinal\x12%\n\x0eparent_ordinal\x18\x07\x20\x01(\rR\rparentOrdin\
+    al\x12\x14\n\x05depth\x18\x08\x20\x01(\rR\x05depth\x12M\n\x0fbalance_cha\
+    nges\x18\t\x20\x03(\x0b2$.dfuse.solana.codec.v1.BalanceChangeR\x0ebalanc\
+    eChanges\x12M\n\x0faccount_changes\x18\n\x20\x03(\x0b2$.dfuse.solana.cod\
+    ec.v1.AccountChangeR\x0eaccountChanges\x12\x16\n\x06failed\x18\x0f\x20\
+    \x01(\x08R\x06failed\x12=\n\x05error\x18\x10\x20\x01(\x0b2'.dfuse.solana\
+    .codec.v1.InstructionErrorR\x05error\"o\n\rBalanceChange\x12\x16\n\x06pu\
+    bkey\x18\x01\x20\x01(\tR\x06pubkey\x12#\n\rprev_lamports\x18\x02\x20\x01\
+    (\x04R\x0cprevLamports\x12!\n\x0cnew_lamports\x18\x03\x20\x01(\x04R\x0bn\
+    ewLamports\"\x87\x01\n\rAccountChange\x12\x16\n\x06pubkey\x18\x01\x20\
+    \x01(\tR\x06pubkey\x12\x1b\n\tprev_data\x18\x02\x20\x01(\x0cR\x08prevDat\
+    a\x12\x19\n\x08new_data\x18\x03\x20\x01(\x0cR\x07newData\x12&\n\x0fnew_d\
+    ata_length\x18\x04\x20\x01(\x04R\rnewDataLength\"\x83\x01\n\x10Transacti\
+    onError\x12?\n\x04type\x18\x01\x20\x01(\x0e2+.dfuse.solana.codec.v1.Tran\
+    sactionErrorTypeR\x04type\x12.\n\x07payload\x18\x02\x20\x01(\x0b2\x14.go\
+    ogle.protobuf.AnyR\x07payload\"r\n\x1bTransactionInstructionError\x12\
+    \x14\n\x05Index\x18\x01\x20\x01(\rR\x05Index\x12=\n\x05error\x18\x02\x20\
+    \x01(\x0b2'.dfuse.solana.codec.v1.InstructionErrorR\x05error\"\x83\x01\n\
+    \x10InstructionError\x12?\n\x04type\x18\x02\x20\x01(\x0e2+.dfuse.solana.\
+    codec.v1.InstructionErrorTypeR\x04type\x12.\n\x07payload\x18\x03\x20\x01\
+    (\x0b2\x14.google.protobuf.AnyR\x07payload\"(\n\x16InstructionErrorCusto\
+    m\x12\x0e\n\x02id\x18\x01\x20\x01(\rR\x02id*\xbc\x03\n\x14TransactionErr\
+    orType\x12\x12\n\x0eACCOUNT_IN_USE\x10\0\x12\x18\n\x14ACCOUNT_LOADED_TWI\
+    CE\x10\x01\x12\x15\n\x11ACCOUNT_NOT_FOUND\x10\x02\x12\x1d\n\x19PROGRAM_A\
+    CCOUNT_NOT_FOUND\x10\x03\x12\x1e\n\x1aINSUFFICIENT_FUNDS_FOR_FEE\x10\x04\
+    \x12\x1b\n\x17INVALID_ACCOUNT_FOR_FEE\x10\x05\x12\x17\n\x13DUPLICATE_SIG\
+    NATURE\x10\x06\x12\x17\n\x13BLOCKHASH_NOT_FOUND\x10\x07\x12\x15\n\x11INS\
+    TRUCTION_ERROR\x10\x08\x12\x17\n\x13CALL_CHAIN_TOO_DEEP\x10\t\x12\x1d\n\
+    \x19MISSING_SIGNATURE_FOR_FEE\x10\n\x12\x19\n\x15INVALID_ACCOUNT_INDEX\
+    \x10\x0b\x12\x15\n\x11SIGNATURE_FAILURE\x10\x0c\x12!\n\x1dINVALID_PROGRA\
+    M_FOR_EXECUTION\x10\r\x12\x14\n\x10SANITIZE_FAILURE\x10\x0e\x12\x17\n\
+    \x13CLUSTER_MAINTENANCE\x10\x0f*\xce\t\n\x14InstructionErrorType\x12\x11\
+    \n\rGENERIC_ERROR\x10\0\x12\x14\n\x10INVALID_ARGUMENT\x10\x01\x12\x1c\n\
+    \x18INVALID_INSTRUCTION_DATA\x10\x02\x12\x18\n\x14INVALID_ACCOUNT_DATA\
+    \x10\x03\x12\x1a\n\x16ACCOUNT_DATA_TOO_SMALL\x10\x04\x12\x16\n\x12INSUFF\
+    ICIENT_FUNDS\x10\x05\x12\x18\n\x14INCORRECT_PROGRAM_ID\x10\x06\x12\x1e\n\
+    \x1aMISSING_REQUIRED_SIGNATURE\x10\x07\x12\x1f\n\x1bACCOUNT_ALREADY_INIT\
+    IALIZED\x10\x08\x12\x19\n\x15UNINITIALIZED_ACCOUNT\x10\t\x12\x1a\n\x16UN\
+    BALANCED_INSTRUCTION\x10\n\x12\x17\n\x13MODIFIED_PROGRAM_ID\x10\x0b\x12\
+    \"\n\x1eEXTERNAL_ACCOUNT_LAMPORT_SPEND\x10\x0c\x12\"\n\x1eEXTERNAL_ACCOU\
+    NT_DATA_MODIFIED\x10\r\x12\x1b\n\x17READONLY_LAMPORT_CHANGE\x10\x0e\x12\
+    \x1a\n\x16READONLY_DATA_MODIFIED\x10\x0f\x12\x1b\n\x17DUPLICATE_ACCOUNT_\
+    INDEX\x10\x10\x12\x17\n\x13EXECUTABLE_MODIFIED\x10\x11\x12\x17\n\x13RENT\
+    _EPOCH_MODIFIED\x10\x12\x12\x1b\n\x17NOT_ENOUGH_ACCOUNT_KEYS\x10\x13\x12\
+    \x1d\n\x19ACCOUNT_DATA_SIZE_CHANGED\x10\x14\x12\x1a\n\x16ACCOUNT_NOT_EXE\
+    CUTABLE\x10\x15\x12\x19\n\x15ACCOUNT_BORROW_FAILED\x10\x16\x12\x1e\n\x1a\
+    ACCOUNT_BORROW_OUTSTANDING\x10\x17\x12!\n\x1dDUPLICATE_ACCOUNT_OUT_OF_SY\
+    NC\x10\x18\x12\n\n\x06CUSTOM\x10\x19\x12\x11\n\rINVALID_ERROR\x10\x1a\
+    \x12\x1c\n\x18EXECUTABLE_DATA_MODIFIED\x10\x1b\x12\x1d\n\x19EXECUTABLE_L\
+    AMPORT_CHANGE\x10\x1c\x12&\n\"EXECUTABLE_ACCOUNT_NOT_RENT_EXEMPT\x10\x1d\
+    \x12\x1a\n\x16UNSUPPORTED_PROGRAM_ID\x10\x1e\x12\x0e\n\nCALL_DEPTH\x10\
+    \x1f\x12\x13\n\x0fMISSING_ACCOUNT\x10\x20\x12\x1a\n\x16REENTRANCY_NOT_AL\
+    LOWED\x10!\x12\x1c\n\x18MAX_SEED_LENGTH_EXCEEDED\x10\"\x12\x11\n\rINVALI\
+    D_SEEDS\x10#\x12\x13\n\x0fINVALID_REALLOC\x10$\x12!\n\x1dCOMPUTATIONAL_B\
+    UDGET_EXCEEDED\x10%\x12\x18\n\x14PRIVILEGE_ESCALATION\x10&\x12%\n!PROGRA\
+    M_ENVIRONMENT_SETUP_FAILURE\x10'\x12\x1e\n\x1aPROGRAM_FAILED_TO_COMPLETE\
+    \x10(\x12\x1d\n\x19PROGRAM_FAILED_TO_COMPILE\x10)\x12\r\n\tIMMUTABLE\x10\
+    *\x12\x17\n\x13INCORRECT_AUTHORITY\x10+BCZAgithub.com/dfuse-io/dfuse-sol\
+    ana/pb/dfuse/solana/codec/v1;pbcodecJ\xeaw\n\x07\x12\x05\0\0\x96\x03\x01\
+    \n\x08\n\x01\x0c\x12\x03\0\0\x12\n\x08\n\x01\x02\x12\x03\x02\0\x1e\n\t\n\
+    \x02\x03\0\x12\x03\x04\0#\n\x08\n\x01\x08\x12\x03\x05\0X\n\t\n\x02\x08\
+    \x0b\x12\x03\x05\0X\n\n\n\x02\x04\0\x12\x04\x08\0\x14\x01\n\n\n\x03\x04\
+    \0\x01\x12\x03\x08\x08\x0c\n6\n\x04\x04\0\x02\0\x12\x03\t\x02\x10\")\x20\
+    hash\x20of\x20the\x20last\x20Entry\x20closing\x20the\x20slot\n\n\x0c\n\
+    \x05\x04\0\x02\0\x05\x12\x03\t\x02\x08\n\x0c\n\x05\x04\0\x02\0\x01\x12\
+    \x03\t\t\x0b\n\x0c\n\x05\x04\0\x02\0\x03\x12\x03\t\x0e\x0f\n,\n\x04\x04\
+    \0\x02\x01\x12\x03\n\x02\x14\"\x1f\x20slot\x20number,\x20not\x20block\
+    \x20number\n\n\x0c\n\x05\x04\0\x02\x01\x05\x12\x03\n\x02\x08\n\x0c\n\x05\
+    \x04\0\x02\x01\x01\x12\x03\n\t\x0f\n\x0c\n\x05\x04\0\x02\x01\x03\x12\x03\
+    \n\x12\x13\n4\n\x04\x04\0\x02\x02\x12\x03\x0b\x02\x19\"'\x20corresponds\
+    \x20to\x20the\x20previous\x20SLOT\x20hash\n\n\x0c\n\x05\x04\0\x02\x02\
+    \x05\x12\x03\x0b\x02\x08\n\x0c\n\x05\x04\0\x02\x02\x01\x12\x03\x0b\t\x14\
+    \n\x0c\n\x05\x04\0\x02\x02\x03\x12\x03\x0b\x17\x18\n\x0b\n\x04\x04\0\x02\
+    \x03\x12\x03\x0c\x02\x15\n\x0c\n\x05\x04\0\x02\x03\x05\x12\x03\x0c\x02\
+    \x08\n\x0c\n\x05\x04\0\x02\x03\x01\x12\x03\x0c\t\x10\n\x0c\n\x05\x04\0\
+    \x02\x03\x03\x12\x03\x0c\x13\x14\n\x0b\n\x04\x04\0\x02\x04\x12\x03\r\x02\
+    \x12\n\x0c\n\x05\x04\0\x02\x04\x06\x12\x03\r\x02\x07\n\x0c\n\x05\x04\0\
+    \x02\x04\x01\x12\x03\r\x08\r\n\x0c\n\x05\x04\0\x02\x04\x03\x12\x03\r\x10\
+    \x11\n\x0b\n\x04\x04\0\x02\x05\x12\x03\x0f\x02(\n\x0c\n\x05\x04\0\x02\
+    \x05\x04\x12\x03\x0f\x02\n\n\x0c\n\x05\x04\0\x02\x05\x06\x12\x03\x0f\x0b\
+    \x16\n\x0c\n\x05\x04\0\x02\x05\x01\x12\x03\x0f\x17#\n\x0c\n\x05\x04\0\
+    \x02\x05\x03\x12\x03\x0f&'\n\x0b\n\x04\x04\0\x02\x06\x12\x03\x10\x02\x1f\
+    \n\x0c\n\x05\x04\0\x02\x06\x05\x12\x03\x10\x02\x08\n\x0c\n\x05\x04\0\x02\
+    \x06\x01\x12\x03\x10\t\x1a\n\x0c\n\x05\x04\0\x02\x06\x03\x12\x03\x10\x1d\
+    \x1e\n\x0b\n\x04\x04\0\x02\x07\x12\x03\x12\x02%\n\x0c\n\x05\x04\0\x02\
+    \x07\x05\x12\x03\x12\x02\x06\n\x0c\n\x05\x04\0\x02\x07\x01\x12\x03\x12\
+    \x07\x20\n\x0c\n\x05\x04\0\x02\x07\x03\x12\x03\x12#$\n\x0b\n\x04\x04\0\
+    \x02\x08\x12\x03\x13\x02'\n\x0c\n\x05\x04\0\x02\x08\x05\x12\x03\x13\x02\
+    \x08\n\x0c\n\x05\x04\0\x02\x08\x01\x12\x03\x13\t!\n\x0c\n\x05\x04\0\x02\
+    \x08\x03\x12\x03\x13$&\n\n\n\x02\x04\x01\x12\x04\x16\0\x1f\x01\n\n\n\x03\
+    \x04\x01\x01\x12\x03\x16\x08\r\n3\n\x04\x04\x01\x02\0\x12\x03\x17\x02\
+    \x10\"&\x20corresponds\x20to\x20the\x20Slot\x20id\x20(or\x20hash)\n\n\
+    \x0c\n\x05\x04\x01\x02\0\x05\x12\x03\x17\x02\x08\n\x0c\n\x05\x04\x01\x02\
+    \0\x01\x12\x03\x17\t\x0b\n\x0c\n\x05\x04\x01\x02\0\x03\x12\x03\x17\x0e\
+    \x0f\n<\n\x04\x04\x01\x02\x01\x12\x03\x18\x02\x14\"/\x20corresponds\x20t\
+    o\x20the\x20Slot\x20number\x20for\x20this\x20block\n\n\x0c\n\x05\x04\x01\
+    \x02\x01\x05\x12\x03\x18\x02\x08\n\x0c\n\x05\x04\x01\x02\x01\x01\x12\x03\
+    \x18\t\x0f\n\x0c\n\x05\x04\x01\x02\x01\x03\x12\x03\x18\x12\x13\n\x0b\n\
+    \x04\x04\x01\x02\x02\x12\x03\x19\x02\x14\n\x0c\n\x05\x04\x01\x02\x02\x05\
+    \x12\x03\x19\x02\x08\n\x0c\n\x05\x04\x01\x02\x02\x01\x12\x03\x19\t\x0f\n\
+    \x0c\n\x05\x04\x01\x02\x02\x03\x12\x03\x19\x12\x13\nV\n\x04\x04\x01\x02\
+    \x03\x12\x03\x1a\x02\x19\"I\x20corresponds\x20to\x20the\x20previous_bloc\
+    khash,\x20might\x20skip\x20some\x20slots,\x20so\x20beware\n\n\x0c\n\x05\
+    \x04\x01\x02\x03\x05\x12\x03\x1a\x02\x08\n\x0c\n\x05\x04\x01\x02\x03\x01\
+    \x12\x03\x1a\t\x14\n\x0c\n\x05\x04\x01\x02\x03\x03\x12\x03\x1a\x17\x18\n\
+    \x0b\n\x04\x04\x01\x02\x04\x12\x03\x1b\x02!\n\x0c\n\x05\x04\x01\x02\x04\
+    \x05\x12\x03\x1b\x02\x08\n\x0c\n\x05\x04\x01\x02\x04\x01\x12\x03\x1b\t\
+    \x1c\n\x0c\n\x05\x04\x01\x02\x04\x03\x12\x03\x1b\x1f\x20\n\x0b\n\x04\x04\
+    \x01\x02\x05\x12\x03\x1c\x02$\n\x0c\n\x05\x04\x01\x02\x05\x05\x12\x03\
+    \x1c\x02\x08\n\x0c\n\x05\x04\x01\x02\x05\x01\x12\x03\x1c\t\x1f\n\x0c\n\
+    \x05\x04\x01\x02\x05\x03\x12\x03\x1c\"#\n\x0b\n\x04\x04\x01\x02\x06\x12\
+    \x03\x1d\x02\"\n\x0c\n\x05\x04\x01\x02\x06\x05\x12\x03\x1d\x02\x08\n\x0c\
+    \n\x05\x04\x01\x02\x06\x01\x12\x03\x1d\t\x1d\n\x0c\n\x05\x04\x01\x02\x06\
+    \x03\x12\x03\x1d\x20!\n\x0b\n\x04\x04\x01\x02\x07\x12\x03\x1e\x02\x16\n\
+    \x0c\n\x05\x04\x01\x02\x07\x05\x12\x03\x1e\x02\x08\n\x0c\n\x05\x04\x01\
+    \x02\x07\x01\x12\x03\x1e\t\x11\n\x0c\n\x05\x04\x01\x02\x07\x03\x12\x03\
+    \x1e\x14\x15\n\n\n\x02\x04\x02\x12\x04!\0#\x01\n\n\n\x03\x04\x02\x01\x12\
+    \x03!\x08\r\n\x0b\n\x04\x04\x02\x02\0\x12\x03\"\x02(\n\x0c\n\x05\x04\x02\
+    \x02\0\x04\x12\x03\"\x02\n\n\x0c\n\x05\x04\x02\x02\0\x06\x12\x03\"\x0b\
+    \x16\n\x0c\n\x05\x04\x02\x02\0\x01\x12\x03\"\x17#\n\x0c\n\x05\x04\x02\
+    \x02\0\x03\x12\x03\"&'\nQ\n\x02\x04\x03\x12\x04&\0)\x01\x1aE\x20Bundled\
+    \x20in\x20separate\x20files,\x20referenced\x20by\x20`account_changes_fil\
+    e_ref`\n\n\n\n\x03\x04\x03\x01\x12\x03&\x08\x1c\nP\n\x04\x04\x03\x02\0\
+    \x12\x03(\x026\x1aC\x20Maps\x20to\x20the\x20index\x20of\x20the\x20`repea\
+    ted`\x20field\x20for\x20Block::transactions\n\n\x0c\n\x05\x04\x03\x02\0\
+    \x04\x12\x03(\x02\n\n\x0c\n\x05\x04\x03\x02\0\x06\x12\x03(\x0b$\n\x0c\n\
+    \x05\x04\x03\x02\0\x01\x12\x03(%1\n\x0c\n\x05\x04\x03\x02\0\x03\x12\x03(\
+    45\n\n\n\x02\x04\x04\x12\x04+\01\x01\n\n\n\x03\x04\x04\x01\x12\x03+\x08!\
+    \n\x0b\n\x04\x04\x04\x02\0\x12\x03,\x02\x13\n\x0c\n\x05\x04\x04\x02\0\
+    \x05\x12\x03,\x02\x08\n\x0c\n\x05\x04\x04\x02\0\x01\x12\x03,\t\x0e\n\x0c\
+    \n\x05\x04\x04\x02\0\x03\x12\x03,\x11\x12\nh\n\x04\x04\x04\x02\x01\x12\
+    \x030\x029\x1a[\x20Maps\x20to\x20the\x20index\x20within\x20the\x20`repea\
+    ted`\x20field\x20of\x20the\x20proto\x20for\n\x20Transaction::instruction\
+    s\n\n\x0c\n\x05\x04\x04\x02\x01\x04\x12\x030\x02\n\n\x0c\n\x05\x04\x04\
+    \x02\x01\x06\x12\x030\x0b'\n\x0c\n\x05\x04\x04\x02\x01\x01\x12\x030(4\n\
+    \x0c\n\x05\x04\x04\x02\x01\x03\x12\x03078\n\n\n\x02\x04\x05\x12\x043\06\
+    \x01\n\n\n\x03\x04\x05\x01\x12\x033\x08$\n=\n\x04\x04\x05\x02\0\x12\x035\
+    \x02%\x1a0\x20Data\x20to\x20be\x20put\x20in\x20Instruction::account_chan\
+    ges\n\n\x0c\n\x05\x04\x05\x02\0\x04\x12\x035\x02\n\n\x0c\n\x05\x04\x05\
+    \x02\0\x06\x12\x035\x0b\x18\n\x0c\n\x05\x04\x05\x02\0\x01\x12\x035\x19\
+    \x20\n\x0c\n\x05\x04\x05\x02\0\x03\x12\x035#$\n\n\n\x02\x04\x06\x12\x048\
+    \0V\x01\n\n\n\x03\x04\x06\x01\x12\x038\x08\x13\n~\n\x04\x04\x06\x02\0\
+    \x12\x03;\x02\x10\x1aq\x20The\x20transaction\x20ID\x20corresponds\x20to\
+    \x20the\x20_first_\n\x20signature.\x20Additional\x20signatures\x20are\
+    \x20in\x20`additional_signatures`.\n\n\x0c\n\x05\x04\x06\x02\0\x05\x12\
+    \x03;\x02\x08\n\x0c\n\x05\x04\x06\x02\0\x01\x12\x03;\t\x0b\n\x0c\n\x05\
+    \x04\x06\x02\0\x03\x12\x03;\x0e\x0f\nC\n\x04\x04\x06\x02\x01\x12\x03>\
+    \x02\x16\x1a6\x20slot_num\x20could\x20be\x20zero\x20for\x20non-executed\
+    \x20transactions\n\n\x0c\n\x05\x04\x06\x02\x01\x05\x12\x03>\x02\x08\n\
+    \x0c\n\x05\x04\x06\x02\x01\x01\x12\x03>\t\x11\n\x0c\n\x05\x04\x06\x02\
+    \x01\x03\x12\x03>\x14\x15\nE\n\x04\x04\x06\x02\x02\x12\x03@\x02\x17\x1a8\
+    \x20slot_hash\x20could\x20be\x20empty\x20for\x20non-executed\x20transact\
+    ions\n\n\x0c\n\x05\x04\x06\x02\x02\x05\x12\x03@\x02\x08\n\x0c\n\x05\x04\
+    \x06\x02\x02\x01\x12\x03@\t\x12\n\x0c\n\x05\x04\x06\x02\x02\x03\x12\x03@\
+    \x15\x16\n\xc2\x01\n\x04\x04\x06\x02\x03\x12\x03E\x02\x13\x1a\xb4\x01\
+    \x20Index\x20from\x20within\x20a\x20single\x20Slot,\x20deterministically\
+    \x20ordered\x20to\x20the\n\x20best\x20of\x20our\x20ability\x20using\x20t\
+    he\x20transaction\x20ID\x20as\x20a\x20sort\x20key\x20for\n\x20the\x20bat\
+    ch\x20of\x20transactions\x20executed\x20in\x20parallel.\n\n\x0c\n\x05\
+    \x04\x06\x02\x03\x05\x12\x03E\x02\x08\n\x0c\n\x05\x04\x06\x02\x03\x01\
+    \x12\x03E\t\x0e\n\x0c\n\x05\x04\x06\x02\x03\x03\x12\x03E\x11\x12\n\x0b\n\
+    \x04\x04\x06\x02\x04\x12\x03G\x02,\n\x0c\n\x05\x04\x06\x02\x04\x04\x12\
+    \x03G\x02\n\n\x0c\n\x05\x04\x06\x02\x04\x05\x12\x03G\x0b\x11\n\x0c\n\x05\
+    \x04\x06\x02\x04\x01\x12\x03G\x12'\n\x0c\n\x05\x04\x06\x02\x04\x03\x12\
+    \x03G*+\n\x0b\n\x04\x04\x06\x02\x05\x12\x03I\x02\x1b\n\x0c\n\x05\x04\x06\
+    \x02\x05\x06\x12\x03I\x02\x0f\n\x0c\n\x05\x04\x06\x02\x05\x01\x12\x03I\
+    \x10\x16\n\x0c\n\x05\x04\x06\x02\x05\x03\x12\x03I\x19\x1a\n/\n\x04\x04\
+    \x06\x02\x06\x12\x03K\x02#\x1a\"\x20From\x20the\x20original\x20Message\
+    \x20object\n\n\x0c\n\x05\x04\x06\x02\x06\x04\x12\x03K\x02\n\n\x0c\n\x05\
+    \x04\x06\x02\x06\x05\x12\x03K\x0b\x11\n\x0c\n\x05\x04\x06\x02\x06\x01\
+    \x12\x03K\x12\x1e\n\x0c\n\x05\x04\x06\x02\x06\x03\x12\x03K!\"\n/\n\x04\
+    \x04\x06\x02\x07\x12\x03M\x02\x1e\x1a\"\x20From\x20the\x20original\x20Me\
+    ssage\x20object\n\n\x0c\n\x05\x04\x06\x02\x07\x05\x12\x03M\x02\x08\n\x0c\
+    \n\x05\x04\x06\x02\x07\x01\x12\x03M\t\x19\n\x0c\n\x05\x04\x06\x02\x07\
+    \x03\x12\x03M\x1c\x1d\n;\n\x04\x04\x06\x02\x08\x12\x03P\x02$\x1a.\x20Wha\
+    t\x20follows\x20Once\x20executed\x20these\x20can\x20be\x20set:\n\n\x0c\n\
+    \x05\x04\x06\x02\x08\x04\x12\x03P\x02\n\n\x0c\n\x05\x04\x06\x02\x08\x05\
+    \x12\x03P\x0b\x11\n\x0c\n\x05\x04\x06\x02\x08\x01\x12\x03P\x12\x1e\n\x0c\
+    \n\x05\x04\x06\x02\x08\x03\x12\x03P!#\nN\n\x04\x04\x06\x02\t\x12\x03R\
+    \x02)\x1aA\x20Instructions,\x20containing\x20both\x20top-level\x20and\
+    \x20nested\x20transactions\n\n\x0c\n\x05\x04\x06\x02\t\x04\x12\x03R\x02\
+    \n\n\x0c\n\x05\x04\x06\x02\t\x06\x12\x03R\x0b\x16\n\x0c\n\x05\x04\x06\
+    \x02\t\x01\x12\x03R\x17#\n\x0c\n\x05\x04\x06\x02\t\x03\x12\x03R&(\n\x0b\
+    \n\x04\x04\x06\x02\n\x12\x03T\x02\x13\n\x0c\n\x05\x04\x06\x02\n\x05\x12\
+    \x03T\x02\x06\n\x0c\n\x05\x04\x06\x02\n\x01\x12\x03T\x07\r\n\x0c\n\x05\
+    \x04\x06\x02\n\x03\x12\x03T\x10\x12\n\x0b\n\x04\x04\x06\x02\x0b\x12\x03U\
+    \x02\x1e\n\x0c\n\x05\x04\x06\x02\x0b\x06\x12\x03U\x02\x12\n\x0c\n\x05\
+    \x04\x06\x02\x0b\x01\x12\x03U\x13\x18\n\x0c\n\x05\x04\x06\x02\x0b\x03\
+    \x12\x03U\x1b\x1d\n\n\n\x02\x04\x07\x12\x04X\0\\\x01\n\n\n\x03\x04\x07\
+    \x01\x12\x03X\x08\x15\n\x0b\n\x04\x04\x07\x02\0\x12\x03Y\x02%\n\x0c\n\
+    \x05\x04\x07\x02\0\x05\x12\x03Y\x02\x08\n\x0c\n\x05\x04\x07\x02\0\x01\
+    \x12\x03Y\t\x20\n\x0c\n\x05\x04\x07\x02\0\x03\x12\x03Y#$\n\x0b\n\x04\x04\
+    \x07\x02\x01\x12\x03Z\x02*\n\x0c\n\x05\x04\x07\x02\x01\x05\x12\x03Z\x02\
+    \x08\n\x0c\n\x05\x04\x07\x02\x01\x01\x12\x03Z\t%\n\x0c\n\x05\x04\x07\x02\
+    \x01\x03\x12\x03Z()\n\x0b\n\x04\x04\x07\x02\x02\x12\x03[\x02,\n\x0c\n\
+    \x05\x04\x07\x02\x02\x05\x12\x03[\x02\x08\n\x0c\n\x05\x04\x07\x02\x02\
+    \x01\x12\x03[\t'\n\x0c\n\x05\x04\x07\x02\x02\x03\x12\x03[*+\n\x9f\x03\n\
+    \x02\x04\x08\x12\x04k\0{\x012\x92\x03*\n-\x20instr1\x20(id=1,\x20parent=\
     0)\n-\x20instr2\x20(id=2,\x20parent=0)\x20(pubkey1\x20is\x20writable)\n-\
     \x20instr3\x20(id=3,\x20parent=2)\x20(pubkey1\x20is\x20writable)\n-\x20i\
     nstr4\x20(id=4,\x20parent=3)\x20(pubkey1\x20is\x20writable)\n-\x20instr5\
@@ -3540,52 +4818,365 @@ static file_descriptor_proto_data: &'static [u8] = b"\
     key1)\ncollect\x20delta\x20of\x20pubkey1\ncollect\x20delta\x20of\x20pubk\
     ey1\x20ONLY\x20IF\x20CHANGED\x20AGAIN,\x20from\x20last\x20time\x20we\x20\
     took\x20a\x20snapshot\x20of\x20it.\ncollect\x20delta\x20of\x20pubkey1\n-\
-    \x20instr6\x20(id=6,\x20parent=0)\n\n\n\n\x03\x04\x08\x01\x12\x03e\x08\
-    \x13\n\x0b\n\x04\x04\x08\x02\0\x12\x03f\x02\x18\n\x0c\n\x05\x04\x08\x02\
-    \0\x05\x12\x03f\x02\x08\n\x0c\n\x05\x04\x08\x02\0\x01\x12\x03f\t\x13\n\
-    \x0c\n\x05\x04\x08\x02\0\x03\x12\x03f\x16\x17\n\x0b\n\x04\x04\x08\x02\
-    \x01\x12\x03g\x02#\n\x0c\n\x05\x04\x08\x02\x01\x04\x12\x03g\x02\n\n\x0c\
-    \n\x05\x04\x08\x02\x01\x05\x12\x03g\x0b\x11\n\x0c\n\x05\x04\x08\x02\x01\
-    \x01\x12\x03g\x12\x1e\n\x0c\n\x05\x04\x08\x02\x01\x03\x12\x03g!\"\n\x0b\
-    \n\x04\x04\x08\x02\x02\x12\x03h\x02\x11\n\x0c\n\x05\x04\x08\x02\x02\x05\
-    \x12\x03h\x02\x07\n\x0c\n\x05\x04\x08\x02\x02\x01\x12\x03h\x08\x0c\n\x0c\
-    \n\x05\x04\x08\x02\x02\x03\x12\x03h\x0f\x10\na\n\x04\x04\x08\x02\x03\x12\
-    \x03l\x02\x152T\x20What\x20follows\x20is\x20execution\x20trace\x20data,\
+    \x20instr6\x20(id=6,\x20parent=0)\n\n\n\n\x03\x04\x08\x01\x12\x03k\x08\
+    \x13\n\x0b\n\x04\x04\x08\x02\0\x12\x03l\x02\x18\n\x0c\n\x05\x04\x08\x02\
+    \0\x05\x12\x03l\x02\x08\n\x0c\n\x05\x04\x08\x02\0\x01\x12\x03l\t\x13\n\
+    \x0c\n\x05\x04\x08\x02\0\x03\x12\x03l\x16\x17\n\x0b\n\x04\x04\x08\x02\
+    \x01\x12\x03m\x02#\n\x0c\n\x05\x04\x08\x02\x01\x04\x12\x03m\x02\n\n\x0c\
+    \n\x05\x04\x08\x02\x01\x05\x12\x03m\x0b\x11\n\x0c\n\x05\x04\x08\x02\x01\
+    \x01\x12\x03m\x12\x1e\n\x0c\n\x05\x04\x08\x02\x01\x03\x12\x03m!\"\n\x0b\
+    \n\x04\x04\x08\x02\x02\x12\x03n\x02\x11\n\x0c\n\x05\x04\x08\x02\x02\x05\
+    \x12\x03n\x02\x07\n\x0c\n\x05\x04\x08\x02\x02\x01\x12\x03n\x08\x0c\n\x0c\
+    \n\x05\x04\x08\x02\x02\x03\x12\x03n\x0f\x10\na\n\x04\x04\x08\x02\x03\x12\
+    \x03r\x02\x152T\x20What\x20follows\x20is\x20execution\x20trace\x20data,\
     \x20could\x20be\x20empty\x20for\x20un-executed\x20transactions.\n\n\x0c\
-    \n\x05\x04\x08\x02\x03\x05\x12\x03l\x02\x08\n\x0c\n\x05\x04\x08\x02\x03\
-    \x01\x12\x03l\t\x10\n\x0c\n\x05\x04\x08\x02\x03\x03\x12\x03l\x13\x14\n\
-    \x0b\n\x04\x04\x08\x02\x04\x12\x03m\x02\x1c\n\x0c\n\x05\x04\x08\x02\x04\
-    \x05\x12\x03m\x02\x08\n\x0c\n\x05\x04\x08\x02\x04\x01\x12\x03m\t\x17\n\
-    \x0c\n\x05\x04\x08\x02\x04\x03\x12\x03m\x1a\x1b\n\x0b\n\x04\x04\x08\x02\
-    \x05\x12\x03n\x02\x13\n\x0c\n\x05\x04\x08\x02\x05\x05\x12\x03n\x02\x08\n\
-    \x0c\n\x05\x04\x08\x02\x05\x01\x12\x03n\t\x0e\n\x0c\n\x05\x04\x08\x02\
-    \x05\x03\x12\x03n\x11\x12\n\x0b\n\x04\x04\x08\x02\x06\x12\x03p\x02-\n\
-    \x0c\n\x05\x04\x08\x02\x06\x04\x12\x03p\x02\n\n\x0c\n\x05\x04\x08\x02\
-    \x06\x06\x12\x03p\x0b\x18\n\x0c\n\x05\x04\x08\x02\x06\x01\x12\x03p\x19(\
-    \n\x0c\n\x05\x04\x08\x02\x06\x03\x12\x03p+,\n\x0b\n\x04\x04\x08\x02\x07\
-    \x12\x03q\x02.\n\x0c\n\x05\x04\x08\x02\x07\x04\x12\x03q\x02\n\n\x0c\n\
-    \x05\x04\x08\x02\x07\x06\x12\x03q\x0b\x18\n\x0c\n\x05\x04\x08\x02\x07\
-    \x01\x12\x03q\x19(\n\x0c\n\x05\x04\x08\x02\x07\x03\x12\x03q+-\n\n\n\x02\
-    \x04\t\x12\x04t\0x\x01\n\n\n\x03\x04\t\x01\x12\x03t\x08\x15\n\x0b\n\x04\
-    \x04\t\x02\0\x12\x03u\x02\x14\n\x0c\n\x05\x04\t\x02\0\x05\x12\x03u\x02\
-    \x08\n\x0c\n\x05\x04\t\x02\0\x01\x12\x03u\t\x0f\n\x0c\n\x05\x04\t\x02\0\
-    \x03\x12\x03u\x12\x13\n\x0b\n\x04\x04\t\x02\x01\x12\x03v\x02\x1b\n\x0c\n\
-    \x05\x04\t\x02\x01\x05\x12\x03v\x02\x08\n\x0c\n\x05\x04\t\x02\x01\x01\
-    \x12\x03v\t\x16\n\x0c\n\x05\x04\t\x02\x01\x03\x12\x03v\x19\x1a\n\x0b\n\
-    \x04\x04\t\x02\x02\x12\x03w\x02\x1a\n\x0c\n\x05\x04\t\x02\x02\x05\x12\
-    \x03w\x02\x08\n\x0c\n\x05\x04\t\x02\x02\x01\x12\x03w\t\x15\n\x0c\n\x05\
-    \x04\t\x02\x02\x03\x12\x03w\x18\x19\n\n\n\x02\x04\n\x12\x04z\0\x7f\x01\n\
-    \n\n\x03\x04\n\x01\x12\x03z\x08\x15\n\x0b\n\x04\x04\n\x02\0\x12\x03{\x02\
-    \x14\n\x0c\n\x05\x04\n\x02\0\x05\x12\x03{\x02\x08\n\x0c\n\x05\x04\n\x02\
-    \0\x01\x12\x03{\t\x0f\n\x0c\n\x05\x04\n\x02\0\x03\x12\x03{\x12\x13\n\x0b\
-    \n\x04\x04\n\x02\x01\x12\x03|\x02\x16\n\x0c\n\x05\x04\n\x02\x01\x05\x12\
-    \x03|\x02\x07\n\x0c\n\x05\x04\n\x02\x01\x01\x12\x03|\x08\x11\n\x0c\n\x05\
-    \x04\n\x02\x01\x03\x12\x03|\x14\x15\n\x0b\n\x04\x04\n\x02\x02\x12\x03}\
-    \x02\x15\n\x0c\n\x05\x04\n\x02\x02\x05\x12\x03}\x02\x07\n\x0c\n\x05\x04\
-    \n\x02\x02\x01\x12\x03}\x08\x10\n\x0c\n\x05\x04\n\x02\x02\x03\x12\x03}\
-    \x13\x14\n\x0b\n\x04\x04\n\x02\x03\x12\x03~\x02\x1d\n\x0c\n\x05\x04\n\
-    \x02\x03\x05\x12\x03~\x02\x08\n\x0c\n\x05\x04\n\x02\x03\x01\x12\x03~\t\
-    \x18\n\x0c\n\x05\x04\n\x02\x03\x03\x12\x03~\x1b\x1cb\x06proto3\
+    \n\x05\x04\x08\x02\x03\x05\x12\x03r\x02\x08\n\x0c\n\x05\x04\x08\x02\x03\
+    \x01\x12\x03r\t\x10\n\x0c\n\x05\x04\x08\x02\x03\x03\x12\x03r\x13\x14\n\
+    \x0b\n\x04\x04\x08\x02\x04\x12\x03s\x02\x1c\n\x0c\n\x05\x04\x08\x02\x04\
+    \x05\x12\x03s\x02\x08\n\x0c\n\x05\x04\x08\x02\x04\x01\x12\x03s\t\x17\n\
+    \x0c\n\x05\x04\x08\x02\x04\x03\x12\x03s\x1a\x1b\n\x0b\n\x04\x04\x08\x02\
+    \x05\x12\x03t\x02\x13\n\x0c\n\x05\x04\x08\x02\x05\x05\x12\x03t\x02\x08\n\
+    \x0c\n\x05\x04\x08\x02\x05\x01\x12\x03t\t\x0e\n\x0c\n\x05\x04\x08\x02\
+    \x05\x03\x12\x03t\x11\x12\n\x0b\n\x04\x04\x08\x02\x06\x12\x03v\x02-\n\
+    \x0c\n\x05\x04\x08\x02\x06\x04\x12\x03v\x02\n\n\x0c\n\x05\x04\x08\x02\
+    \x06\x06\x12\x03v\x0b\x18\n\x0c\n\x05\x04\x08\x02\x06\x01\x12\x03v\x19(\
+    \n\x0c\n\x05\x04\x08\x02\x06\x03\x12\x03v+,\n\x0b\n\x04\x04\x08\x02\x07\
+    \x12\x03w\x02.\n\x0c\n\x05\x04\x08\x02\x07\x04\x12\x03w\x02\n\n\x0c\n\
+    \x05\x04\x08\x02\x07\x06\x12\x03w\x0b\x18\n\x0c\n\x05\x04\x08\x02\x07\
+    \x01\x12\x03w\x19(\n\x0c\n\x05\x04\x08\x02\x07\x03\x12\x03w+-\n\x0b\n\
+    \x04\x04\x08\x02\x08\x12\x03y\x02\x13\n\x0c\n\x05\x04\x08\x02\x08\x05\
+    \x12\x03y\x02\x06\n\x0c\n\x05\x04\x08\x02\x08\x01\x12\x03y\x07\r\n\x0c\n\
+    \x05\x04\x08\x02\x08\x03\x12\x03y\x10\x12\n\x0b\n\x04\x04\x08\x02\t\x12\
+    \x03z\x02\x1e\n\x0c\n\x05\x04\x08\x02\t\x06\x12\x03z\x02\x12\n\x0c\n\x05\
+    \x04\x08\x02\t\x01\x12\x03z\x13\x18\n\x0c\n\x05\x04\x08\x02\t\x03\x12\
+    \x03z\x1b\x1d\n\x0b\n\x02\x04\t\x12\x05}\0\x81\x01\x01\n\n\n\x03\x04\t\
+    \x01\x12\x03}\x08\x15\n\x0b\n\x04\x04\t\x02\0\x12\x03~\x02\x14\n\x0c\n\
+    \x05\x04\t\x02\0\x05\x12\x03~\x02\x08\n\x0c\n\x05\x04\t\x02\0\x01\x12\
+    \x03~\t\x0f\n\x0c\n\x05\x04\t\x02\0\x03\x12\x03~\x12\x13\n\x0b\n\x04\x04\
+    \t\x02\x01\x12\x03\x7f\x02\x1b\n\x0c\n\x05\x04\t\x02\x01\x05\x12\x03\x7f\
+    \x02\x08\n\x0c\n\x05\x04\t\x02\x01\x01\x12\x03\x7f\t\x16\n\x0c\n\x05\x04\
+    \t\x02\x01\x03\x12\x03\x7f\x19\x1a\n\x0c\n\x04\x04\t\x02\x02\x12\x04\x80\
+    \x01\x02\x1a\n\r\n\x05\x04\t\x02\x02\x05\x12\x04\x80\x01\x02\x08\n\r\n\
+    \x05\x04\t\x02\x02\x01\x12\x04\x80\x01\t\x15\n\r\n\x05\x04\t\x02\x02\x03\
+    \x12\x04\x80\x01\x18\x19\n\x0c\n\x02\x04\n\x12\x06\x83\x01\0\x88\x01\x01\
+    \n\x0b\n\x03\x04\n\x01\x12\x04\x83\x01\x08\x15\n\x0c\n\x04\x04\n\x02\0\
+    \x12\x04\x84\x01\x02\x14\n\r\n\x05\x04\n\x02\0\x05\x12\x04\x84\x01\x02\
+    \x08\n\r\n\x05\x04\n\x02\0\x01\x12\x04\x84\x01\t\x0f\n\r\n\x05\x04\n\x02\
+    \0\x03\x12\x04\x84\x01\x12\x13\n\x0c\n\x04\x04\n\x02\x01\x12\x04\x85\x01\
+    \x02\x16\n\r\n\x05\x04\n\x02\x01\x05\x12\x04\x85\x01\x02\x07\n\r\n\x05\
+    \x04\n\x02\x01\x01\x12\x04\x85\x01\x08\x11\n\r\n\x05\x04\n\x02\x01\x03\
+    \x12\x04\x85\x01\x14\x15\n\x0c\n\x04\x04\n\x02\x02\x12\x04\x86\x01\x02\
+    \x15\n\r\n\x05\x04\n\x02\x02\x05\x12\x04\x86\x01\x02\x07\n\r\n\x05\x04\n\
+    \x02\x02\x01\x12\x04\x86\x01\x08\x10\n\r\n\x05\x04\n\x02\x02\x03\x12\x04\
+    \x86\x01\x13\x14\n\x0c\n\x04\x04\n\x02\x03\x12\x04\x87\x01\x02\x1d\n\r\n\
+    \x05\x04\n\x02\x03\x05\x12\x04\x87\x01\x02\x08\n\r\n\x05\x04\n\x02\x03\
+    \x01\x12\x04\x87\x01\t\x18\n\r\n\x05\x04\n\x02\x03\x03\x12\x04\x87\x01\
+    \x1b\x1c\n\x0c\n\x02\x04\x0b\x12\x06\x8a\x01\0\x8d\x01\x01\n\x0b\n\x03\
+    \x04\x0b\x01\x12\x04\x8a\x01\x08\x18\n\x0c\n\x04\x04\x0b\x02\0\x12\x04\
+    \x8b\x01\x02\x20\n\r\n\x05\x04\x0b\x02\0\x06\x12\x04\x8b\x01\x02\x16\n\r\
+    \n\x05\x04\x0b\x02\0\x01\x12\x04\x8b\x01\x17\x1b\n\r\n\x05\x04\x0b\x02\0\
+    \x03\x12\x04\x8b\x01\x1e\x1f\n\x0c\n\x04\x04\x0b\x02\x01\x12\x04\x8c\x01\
+    \x02\"\n\r\n\x05\x04\x0b\x02\x01\x06\x12\x04\x8c\x01\x02\x15\n\r\n\x05\
+    \x04\x0b\x02\x01\x01\x12\x04\x8c\x01\x16\x1d\n\r\n\x05\x04\x0b\x02\x01\
+    \x03\x12\x04\x8c\x01\x20!\n\x0c\n\x02\x04\x0c\x12\x06\x8f\x01\0\x92\x01\
+    \x01\n\x0b\n\x03\x04\x0c\x01\x12\x04\x8f\x01\x08#\n\x0c\n\x04\x04\x0c\
+    \x02\0\x12\x04\x90\x01\x02\x13\n\r\n\x05\x04\x0c\x02\0\x05\x12\x04\x90\
+    \x01\x02\x08\n\r\n\x05\x04\x0c\x02\0\x01\x12\x04\x90\x01\t\x0e\n\r\n\x05\
+    \x04\x0c\x02\0\x03\x12\x04\x90\x01\x11\x12\n\x0c\n\x04\x04\x0c\x02\x01\
+    \x12\x04\x91\x01\x02\x1d\n\r\n\x05\x04\x0c\x02\x01\x06\x12\x04\x91\x01\
+    \x02\x12\n\r\n\x05\x04\x0c\x02\x01\x01\x12\x04\x91\x01\x13\x18\n\r\n\x05\
+    \x04\x0c\x02\x01\x03\x12\x04\x91\x01\x1b\x1c\n\x0c\n\x02\x05\0\x12\x06\
+    \x94\x01\0\xdb\x01\x01\n\x0b\n\x03\x05\0\x01\x12\x04\x94\x01\x05\x19\n\
+    \x8b\x01\n\x04\x05\0\x02\0\x12\x04\x98\x01\x02\x15\x1a}/\x20An\x20accoun\
+    t\x20is\x20already\x20being\x20processed\x20in\x20another\x20transaction\
+    \x20in\x20a\x20way\n/\x20that\x20does\x20not\x20support\x20parallelism\n\
+    \x20Account\x20in\x20use\"\n\n\r\n\x05\x05\0\x02\0\x01\x12\x04\x98\x01\
+    \x02\x10\n\r\n\x05\x05\0\x02\0\x02\x12\x04\x98\x01\x13\x14\n\xd8\x01\n\
+    \x04\x05\0\x02\x01\x12\x04\x9d\x01\x02\x1b\x1a\xc9\x01/\x20A\x20`Pubkey`\
+    \x20appears\x20twice\x20in\x20the\x20transaction's\x20`account_keys`.\
+    \x20\x20Instructions\x20can\x20reference\n/\x20`Pubkey`s\x20more\x20than\
+    \x20once\x20but\x20the\x20message\x20must\x20contain\x20a\x20list\x20wit\
+    h\x20no\x20duplicate\x20keys\n\x20Account\x20loaded\x20twice\"\n\n\r\n\
+    \x05\x05\0\x02\x01\x01\x12\x04\x9d\x01\x02\x16\n\r\n\x05\x05\0\x02\x01\
+    \x02\x12\x04\x9d\x01\x19\x1a\n\x99\x01\n\x04\x05\0\x02\x02\x12\x04\xa1\
+    \x01\x02\x18\x1a\x8a\x01/\x20Attempt\x20to\x20debit\x20an\x20account\x20\
+    but\x20found\x20no\x20record\x20of\x20a\x20prior\x20credit.\n\x20Attempt\
+    \x20to\x20debit\x20an\x20account\x20but\x20found\x20no\x20record\x20of\
+    \x20a\x20prior\x20credit.\"\n\n\r\n\x05\x05\0\x02\x02\x01\x12\x04\xa1\
+    \x01\x02\x13\n\r\n\x05\x05\0\x02\x02\x02\x12\x04\xa1\x01\x16\x17\nn\n\
+    \x04\x05\0\x02\x03\x12\x04\xa5\x01\x02\x20\x1a`/\x20Attempt\x20to\x20loa\
+    d\x20a\x20program\x20that\x20does\x20not\x20exist\n\x20Attempt\x20to\x20\
+    load\x20a\x20program\x20that\x20does\x20not\x20exist\"\n\n\r\n\x05\x05\0\
+    \x02\x03\x01\x12\x04\xa5\x01\x02\x1b\n\r\n\x05\x05\0\x02\x03\x02\x12\x04\
+    \xa5\x01\x1e\x1f\n\x8b\x01\n\x04\x05\0\x02\x04\x12\x04\xa9\x01\x02!\x1a}\
+    /\x20The\x20from\x20`Pubkey`\x20does\x20not\x20have\x20sufficient\x20bal\
+    ance\x20to\x20pay\x20the\x20fee\x20to\x20schedule\x20the\x20transaction\
+    \n\x20Insufficient\x20funds\x20for\x20fee\"\n\n\r\n\x05\x05\0\x02\x04\
+    \x01\x12\x04\xa9\x01\x02\x1c\n\r\n\x05\x05\0\x02\x04\x02\x12\x04\xa9\x01\
+    \x1f\x20\n|\n\x04\x05\0\x02\x05\x12\x04\xad\x01\x02\x1e\x1an/\x20This\
+    \x20account\x20may\x20not\x20be\x20used\x20to\x20pay\x20transaction\x20f\
+    ees\n\x20This\x20account\x20may\x20not\x20be\x20used\x20to\x20pay\x20tra\
+    nsaction\x20fees\"\n\n\r\n\x05\x05\0\x02\x05\x01\x12\x04\xad\x01\x02\x19\
+    \n\r\n\x05\x05\0\x02\x05\x02\x12\x04\xad\x01\x1c\x1d\n\x91\x02\n\x04\x05\
+    \0\x02\x06\x12\x04\xb3\x01\x02\x1a\x1a\x82\x02/\x20The\x20bank\x20has\
+    \x20seen\x20this\x20`Signature`\x20before.\x20This\x20can\x20occur\x20un\
+    der\x20normal\x20operation\n/\x20when\x20a\x20UDP\x20packet\x20is\x20dup\
+    licated,\x20as\x20a\x20user\x20error\x20from\x20a\x20client\x20not\x20up\
+    dating\n/\x20its\x20`recent_blockhash`,\x20or\x20as\x20a\x20double-spend\
+    \x20attack.\n\x20The\x20bank\x20has\x20seen\x20this\x20signature\x20befo\
+    re\"\n\n\r\n\x05\x05\0\x02\x06\x01\x12\x04\xb3\x01\x02\x15\n\r\n\x05\x05\
+    \0\x02\x06\x02\x12\x04\xb3\x01\x18\x19\n\xa9\x01\n\x04\x05\0\x02\x07\x12\
+    \x04\xb8\x01\x02\x1a\x1a\x9a\x01/\x20The\x20bank\x20has\x20not\x20seen\
+    \x20the\x20given\x20`recent_blockhash`\x20or\x20the\x20transaction\x20is\
+    \x20too\x20old\x20and\n/\x20the\x20`recent_blockhash`\x20has\x20been\x20\
+    discarded.\n\x20Blockhash\x20not\x20found\"\n\n\r\n\x05\x05\0\x02\x07\
+    \x01\x12\x04\xb8\x01\x02\x15\n\r\n\x05\x05\0\x02\x07\x02\x12\x04\xb8\x01\
+    \x18\x19\n\xca\x01\n\x04\x05\0\x02\x08\x12\x04\xbd\x01\x02\x18\x1a\xbb\
+    \x01/\x20An\x20error\x20occurred\x20while\x20processing\x20an\x20instruc\
+    tion.\x20The\x20first\x20element\x20of\x20the\x20tuple\n/\x20indicates\
+    \x20the\x20instruction\x20index\x20in\x20which\x20the\x20error\x20occurr\
+    ed.\n\x20Error\x20processing\x20Instruction\x20{0}:\x20{1}\"\n\n\r\n\x05\
+    \x05\0\x02\x08\x01\x12\x04\xbd\x01\x02\x13\n\r\n\x05\x05\0\x02\x08\x02\
+    \x12\x04\xbd\x01\x16\x17\nN\n\x04\x05\0\x02\t\x12\x04\xc1\x01\x02\x1a\
+    \x1a@/\x20Loader\x20call\x20chain\x20is\x20too\x20deep\n\x20Loader\x20ca\
+    ll\x20chain\x20is\x20too\x20deep\"\n\n\r\n\x05\x05\0\x02\t\x01\x12\x04\
+    \xc1\x01\x02\x15\n\r\n\x05\x05\0\x02\t\x02\x12\x04\xc1\x01\x18\x19\n\x82\
+    \x01\n\x04\x05\0\x02\n\x12\x04\xc5\x01\x02!\x1at/\x20Transaction\x20requ\
+    ires\x20a\x20fee\x20but\x20has\x20no\x20signature\x20present\n\x20Transa\
+    ction\x20requires\x20a\x20fee\x20but\x20has\x20no\x20signature\x20presen\
+    t\"\n\n\r\n\x05\x05\0\x02\n\x01\x12\x04\xc5\x01\x02\x1b\n\r\n\x05\x05\0\
+    \x02\n\x02\x12\x04\xc5\x01\x1e\x20\nv\n\x04\x05\0\x02\x0b\x12\x04\xc9\
+    \x01\x02\x1d\x1ah/\x20Transaction\x20contains\x20an\x20invalid\x20accoun\
+    t\x20reference\n\x20Transaction\x20contains\x20an\x20invalid\x20account\
+    \x20reference\"\n\n\r\n\x05\x05\0\x02\x0b\x01\x12\x04\xc9\x01\x02\x17\n\
+    \r\n\x05\x05\0\x02\x0b\x02\x12\x04\xc9\x01\x1a\x1c\nr\n\x04\x05\0\x02\
+    \x0c\x12\x04\xcd\x01\x02\x19\x1ad/\x20Transaction\x20did\x20not\x20pass\
+    \x20signature\x20verification\n\x20Transaction\x20did\x20not\x20pass\x20\
+    signature\x20verification\"\n\n\r\n\x05\x05\0\x02\x0c\x01\x12\x04\xcd\
+    \x01\x02\x13\n\r\n\x05\x05\0\x02\x0c\x02\x12\x04\xcd\x01\x16\x18\n\x82\
+    \x01\n\x04\x05\0\x02\r\x12\x04\xd1\x01\x02%\x1at/\x20This\x20program\x20\
+    may\x20not\x20be\x20used\x20for\x20executing\x20instructions\n\x20This\
+    \x20program\x20may\x20not\x20be\x20used\x20for\x20executing\x20instructi\
+    ons\"\n\n\r\n\x05\x05\0\x02\r\x01\x12\x04\xd1\x01\x02\x1f\n\r\n\x05\x05\
+    \0\x02\r\x02\x12\x04\xd1\x01\"$\n\xdd\x01\n\x04\x05\0\x02\x0e\x12\x04\
+    \xd7\x01\x02\x18\x1a\xce\x01/\x20Transaction\x20failed\x20to\x20sanitize\
+    \x20accounts\x20offsets\x20correctly\n/\x20implies\x20that\x20account\
+    \x20locks\x20are\x20not\x20taken\x20for\x20this\x20TX,\x20and\x20should\
+    \n/\x20not\x20be\x20unlocked.\n\x20Transaction\x20failed\x20to\x20saniti\
+    ze\x20accounts\x20offsets\x20correctly\"\n\n\r\n\x05\x05\0\x02\x0e\x01\
+    \x12\x04\xd7\x01\x02\x12\n\r\n\x05\x05\0\x02\x0e\x02\x12\x04\xd7\x01\x15\
+    \x17\nO\n\x04\x05\0\x02\x0f\x12\x04\xda\x01\x02\x1b\x1aA\x20Transactions\
+    \x20are\x20currently\x20disabled\x20due\x20to\x20cluster\x20maintenance\
+    \"\n\n\r\n\x05\x05\0\x02\x0f\x01\x12\x04\xda\x01\x02\x15\n\r\n\x05\x05\0\
+    \x02\x0f\x02\x12\x04\xda\x01\x18\x1a\n\x0c\n\x02\x04\r\x12\x06\xdd\x01\0\
+    \xe0\x01\x01\n\x0b\n\x03\x04\r\x01\x12\x04\xdd\x01\x08\x18\n\x0c\n\x04\
+    \x04\r\x02\0\x12\x04\xde\x01\x02\x20\n\r\n\x05\x04\r\x02\0\x06\x12\x04\
+    \xde\x01\x02\x16\n\r\n\x05\x04\r\x02\0\x01\x12\x04\xde\x01\x17\x1b\n\r\n\
+    \x05\x04\r\x02\0\x03\x12\x04\xde\x01\x1e\x1f\n\x0c\n\x04\x04\r\x02\x01\
+    \x12\x04\xdf\x01\x02\"\n\r\n\x05\x04\r\x02\x01\x06\x12\x04\xdf\x01\x02\
+    \x15\n\r\n\x05\x04\r\x02\x01\x01\x12\x04\xdf\x01\x16\x1d\n\r\n\x05\x04\r\
+    \x02\x01\x03\x12\x04\xdf\x01\x20!\n\x0c\n\x02\x04\x0e\x12\x06\xe2\x01\0\
+    \xe4\x01\x01\n\x0b\n\x03\x04\x0e\x01\x12\x04\xe2\x01\x08\x1e\n\x0c\n\x04\
+    \x04\x0e\x02\0\x12\x04\xe3\x01\x02\x10\n\r\n\x05\x04\x0e\x02\0\x05\x12\
+    \x04\xe3\x01\x02\x08\n\r\n\x05\x04\x0e\x02\0\x01\x12\x04\xe3\x01\t\x0b\n\
+    \r\n\x05\x04\x0e\x02\0\x03\x12\x04\xe3\x01\x0e\x0f\n\x0c\n\x02\x05\x01\
+    \x12\x06\xe6\x01\0\x96\x03\x01\n\x0b\n\x03\x05\x01\x01\x12\x04\xe6\x01\
+    \x05\x19\nz\n\x04\x05\x01\x02\0\x12\x04\xe9\x01\x02\x14\x1al/\x20Depreca\
+    ted!\x20Use\x20CustomError\x20instead!\x20The\x20program\x20instruction\
+    \x20returned\x20an\x20error\n\x20generic\x20instruction\x20error\n\n\r\n\
+    \x05\x05\x01\x02\0\x01\x12\x04\xe9\x01\x02\x0f\n\r\n\x05\x05\x01\x02\0\
+    \x02\x12\x04\xe9\x01\x12\x13\n[\n\x04\x05\x01\x02\x01\x12\x04\xec\x01\
+    \x02\x17\x1aM/\x20The\x20arguments\x20provided\x20to\x20a\x20program\x20\
+    were\x20invalid\n\x20invalid\x20program\x20argument\n\n\r\n\x05\x05\x01\
+    \x02\x01\x01\x12\x04\xec\x01\x02\x12\n\r\n\x05\x05\x01\x02\x01\x02\x12\
+    \x04\xec\x01\x15\x16\nV\n\x04\x05\x01\x02\x02\x12\x04\xf0\x01\x02\x1f\
+    \x1aH/\x20An\x20instruction's\x20data\x20contents\x20were\x20invalid\n\
+    \x20invalid\x20instruction\x20data\n\n\r\n\x05\x05\x01\x02\x02\x01\x12\
+    \x04\xf0\x01\x02\x1a\n\r\n\x05\x05\x01\x02\x02\x02\x12\x04\xf0\x01\x1d\
+    \x1e\n]\n\x04\x05\x01\x02\x03\x12\x04\xf4\x01\x02\x1b\x1aO/\x20An\x20acc\
+    ount's\x20data\x20contents\x20was\x20invalid\n\x20invalid\x20account\x20\
+    data\x20for\x20instruction\n\n\r\n\x05\x05\x01\x02\x03\x01\x12\x04\xf4\
+    \x01\x02\x16\n\r\n\x05\x05\x01\x02\x03\x02\x12\x04\xf4\x01\x19\x1a\nX\n\
+    \x04\x05\x01\x02\x04\x12\x04\xf8\x01\x02\x1d\x1aJ/\x20An\x20account's\
+    \x20data\x20was\x20too\x20small\n\x20account\x20data\x20too\x20small\x20\
+    for\x20instruction\n\n\r\n\x05\x05\x01\x02\x04\x01\x12\x04\xf8\x01\x02\
+    \x18\n\r\n\x05\x05\x01\x02\x04\x02\x12\x04\xf8\x01\x1b\x1c\ns\n\x04\x05\
+    \x01\x02\x05\x12\x04\xfc\x01\x02\x19\x1ae/\x20An\x20account's\x20balance\
+    \x20was\x20too\x20small\x20to\x20complete\x20the\x20instruction\n\x20ins\
+    ufficient\x20funds\x20for\x20instruction\n\n\r\n\x05\x05\x01\x02\x05\x01\
+    \x12\x04\xfc\x01\x02\x14\n\r\n\x05\x05\x01\x02\x05\x02\x12\x04\xfc\x01\
+    \x17\x18\ng\n\x04\x05\x01\x02\x06\x12\x04\x80\x02\x02\x1b\x1aY/\x20The\
+    \x20account\x20did\x20not\x20have\x20the\x20expected\x20program\x20id\n\
+    \x20incorrect\x20program\x20id\x20for\x20instruction\n\n\r\n\x05\x05\x01\
+    \x02\x06\x01\x12\x04\x80\x02\x02\x16\n\r\n\x05\x05\x01\x02\x06\x02\x12\
+    \x04\x80\x02\x19\x1a\nc\n\x04\x05\x01\x02\x07\x12\x04\x84\x02\x02!\x1aU/\
+    \x20A\x20signature\x20was\x20required\x20but\x20not\x20found\n\x20missin\
+    g\x20required\x20signature\x20for\x20instruction\n\n\r\n\x05\x05\x01\x02\
+    \x07\x01\x12\x04\x84\x02\x02\x1c\n\r\n\x05\x05\x01\x02\x07\x02\x12\x04\
+    \x84\x02\x1f\x20\n\x94\x01\n\x04\x05\x01\x02\x08\x12\x04\x88\x02\x02\"\
+    \x1a\x85\x01/\x20An\x20initialize\x20instruction\x20was\x20sent\x20to\
+    \x20an\x20account\x20that\x20has\x20already\x20been\x20initialized.\n\
+    \x20instruction\x20requires\x20an\x20uninitialized\x20account\n\n\r\n\
+    \x05\x05\x01\x02\x08\x01\x12\x04\x88\x02\x02\x1d\n\r\n\x05\x05\x01\x02\
+    \x08\x02\x12\x04\x88\x02\x20!\n\x7f\n\x04\x05\x01\x02\t\x12\x04\x8c\x02\
+    \x02\x1c\x1aq/\x20An\x20attempt\x20to\x20operate\x20on\x20an\x20account\
+    \x20that\x20hasn't\x20been\x20initialized.\n\x20instruction\x20requires\
+    \x20an\x20initialized\x20account\n\n\r\n\x05\x05\x01\x02\t\x01\x12\x04\
+    \x8c\x02\x02\x17\n\r\n\x05\x05\x01\x02\t\x02\x12\x04\x8c\x02\x1a\x1b\n\
+    \xab\x01\n\x04\x05\x01\x02\n\x12\x04\x90\x02\x02\x1e\x1a\x9c\x01/\x20Pro\
+    gram's\x20instruction\x20lamport\x20balance\x20does\x20not\x20equal\x20t\
+    he\x20balance\x20after\x20the\x20instruction\n\x20sum\x20of\x20account\
+    \x20balances\x20before\x20and\x20after\x20instruction\x20do\x20not\x20ma\
+    tch\n\n\r\n\x05\x05\x01\x02\n\x01\x12\x04\x90\x02\x02\x18\n\r\n\x05\x05\
+    \x01\x02\n\x02\x12\x04\x90\x02\x1b\x1d\nl\n\x04\x05\x01\x02\x0b\x12\x04\
+    \x94\x02\x02\x1b\x1a^/\x20Program\x20modified\x20an\x20account's\x20prog\
+    ram\x20id\n\x20instruction\x20modified\x20the\x20program\x20id\x20of\x20\
+    an\x20account\n\n\r\n\x05\x05\x01\x02\x0b\x01\x12\x04\x94\x02\x02\x15\n\
+    \r\n\x05\x05\x01\x02\x0b\x02\x12\x04\x94\x02\x18\x1a\n\x96\x01\n\x04\x05\
+    \x01\x02\x0c\x12\x04\x98\x02\x02&\x1a\x87\x01/\x20Program\x20spent\x20th\
+    e\x20lamports\x20of\x20an\x20account\x20that\x20doesn't\x20belong\x20to\
+    \x20it\n\x20instruction\x20spent\x20from\x20the\x20balance\x20of\x20an\
+    \x20account\x20it\x20does\x20not\x20own\n\n\r\n\x05\x05\x01\x02\x0c\x01\
+    \x12\x04\x98\x02\x02\x20\n\r\n\x05\x05\x01\x02\x0c\x02\x12\x04\x98\x02#%\
+    \n\x8b\x01\n\x04\x05\x01\x02\r\x12\x04\x9c\x02\x02&\x1a}/\x20Program\x20\
+    modified\x20the\x20data\x20of\x20an\x20account\x20that\x20doesn't\x20bel\
+    ong\x20to\x20it\n\x20instruction\x20modified\x20data\x20of\x20an\x20acco\
+    unt\x20it\x20does\x20not\x20own\n\n\r\n\x05\x05\x01\x02\r\x01\x12\x04\
+    \x9c\x02\x02\x20\n\r\n\x05\x05\x01\x02\r\x02\x12\x04\x9c\x02#%\nn\n\x04\
+    \x05\x01\x02\x0e\x12\x04\xa0\x02\x02\x1f\x1a`/\x20Read-only\x20account's\
+    \x20lamports\x20modified\n\x20instruction\x20changed\x20the\x20balance\
+    \x20of\x20a\x20read-only\x20account\n\n\r\n\x05\x05\x01\x02\x0e\x01\x12\
+    \x04\xa0\x02\x02\x19\n\r\n\x05\x05\x01\x02\x0e\x02\x12\x04\xa0\x02\x1c\
+    \x1e\nh\n\x04\x05\x01\x02\x0f\x12\x04\xa4\x02\x02\x1e\x1aZ/\x20Read-only\
+    \x20account's\x20data\x20was\x20modified\n\x20instruction\x20modified\
+    \x20data\x20of\x20a\x20read-only\x20account\n\n\r\n\x05\x05\x01\x02\x0f\
+    \x01\x12\x04\xa4\x02\x02\x18\n\r\n\x05\x05\x01\x02\x0f\x02\x12\x04\xa4\
+    \x02\x1b\x1d\n\xb8\x01\n\x04\x05\x01\x02\x10\x12\x04\xa9\x02\x02\x1f\x1a\
+    \xa9\x01/\x20An\x20account\x20was\x20referenced\x20more\x20than\x20once\
+    \x20in\x20a\x20single\x20instruction\n\x20Deprecated,\x20instructions\
+    \x20can\x20now\x20contain\x20duplicate\x20accounts\n\x20instruction\x20c\
+    ontains\x20duplicate\x20accounts\n\n\r\n\x05\x05\x01\x02\x10\x01\x12\x04\
+    \xa9\x02\x02\x19\n\r\n\x05\x05\x01\x02\x10\x02\x12\x04\xa9\x02\x1c\x1e\n\
+    x\n\x04\x05\x01\x02\x11\x12\x04\xad\x02\x02\x1b\x1aj/\x20Executable\x20b\
+    it\x20on\x20account\x20changed,\x20but\x20shouldn't\x20have\n\x20instruc\
+    tion\x20changed\x20executable\x20bit\x20of\x20an\x20account\n\n\r\n\x05\
+    \x05\x01\x02\x11\x01\x12\x04\xad\x02\x02\x15\n\r\n\x05\x05\x01\x02\x11\
+    \x02\x12\x04\xad\x02\x18\x1a\nn\n\x04\x05\x01\x02\x12\x12\x04\xb1\x02\
+    \x02\x1b\x1a`/\x20Rent_epoch\x20account\x20changed,\x20but\x20shouldn't\
+    \x20have\n\x20instruction\x20modified\x20rent\x20epoch\x20of\x20an\x20ac\
+    count\n\n\r\n\x05\x05\x01\x02\x12\x01\x12\x04\xb1\x02\x02\x15\n\r\n\x05\
+    \x05\x01\x02\x12\x02\x12\x04\xb1\x02\x18\x1a\nl\n\x04\x05\x01\x02\x13\
+    \x12\x04\xb5\x02\x02\x1f\x1a^/\x20The\x20instruction\x20expected\x20addi\
+    tional\x20account\x20keys\n\x20insufficient\x20account\x20keys\x20for\
+    \x20instruction\n\n\r\n\x05\x05\x01\x02\x13\x01\x12\x04\xb5\x02\x02\x19\
+    \n\r\n\x05\x05\x01\x02\x13\x02\x12\x04\xb5\x02\x1c\x1e\nw\n\x04\x05\x01\
+    \x02\x14\x12\x04\xb9\x02\x02!\x1ai/\x20A\x20non-system\x20program\x20cha\
+    nged\x20the\x20size\x20of\x20the\x20account\x20data\n\x20non-system\x20i\
+    nstruction\x20changed\x20account\x20size\n\n\r\n\x05\x05\x01\x02\x14\x01\
+    \x12\x04\xb9\x02\x02\x1b\n\r\n\x05\x05\x01\x02\x14\x02\x12\x04\xb9\x02\
+    \x1e\x20\nk\n\x04\x05\x01\x02\x15\x12\x04\xbd\x02\x02\x1e\x1a]/\x20The\
+    \x20instruction\x20expected\x20an\x20executable\x20account\n\x20instruct\
+    ion\x20expected\x20an\x20executable\x20account\n\n\r\n\x05\x05\x01\x02\
+    \x15\x01\x12\x04\xbd\x02\x02\x18\n\r\n\x05\x05\x01\x02\x15\x02\x12\x04\
+    \xbd\x02\x1b\x1d\n\xa0\x01\n\x04\x05\x01\x02\x16\x12\x04\xc1\x02\x02\x1d\
+    \x1a\x91\x01/\x20Failed\x20to\x20borrow\x20a\x20reference\x20to\x20accou\
+    nt\x20data,\x20already\x20borrowed\n\x20instruction\x20tries\x20to\x20bo\
+    rrow\x20reference\x20for\x20an\x20account\x20which\x20is\x20already\x20b\
+    orrowed\n\n\r\n\x05\x05\x01\x02\x16\x01\x12\x04\xc1\x02\x02\x17\n\r\n\
+    \x05\x05\x01\x02\x16\x02\x12\x04\xc1\x02\x1a\x1c\n\x98\x01\n\x04\x05\x01\
+    \x02\x17\x12\x04\xc5\x02\x02\"\x1a\x89\x01/\x20Account\x20data\x20has\
+    \x20an\x20outstanding\x20reference\x20after\x20a\x20program's\x20executi\
+    on\n\x20instruction\x20left\x20account\x20with\x20an\x20outstanding\x20r\
+    eference\x20borrowed\n\n\r\n\x05\x05\x01\x02\x17\x01\x12\x04\xc5\x02\x02\
+    \x1c\n\r\n\x05\x05\x01\x02\x17\x02\x12\x04\xc5\x02\x1f!\n\xe3\x02\n\x04\
+    \x05\x01\x02\x18\x12\x04\xcb\x02\x02%\x1a\xd4\x02/\x20The\x20same\x20acc\
+    ount\x20was\x20multiply\x20passed\x20to\x20an\x20on-chain\x20program's\
+    \x20entrypoint,\x20but\x20the\x20program\n/\x20modified\x20them\x20diffe\
+    rently.\x20\x20A\x20program\x20can\x20only\x20modify\x20one\x20instance\
+    \x20of\x20the\x20account\x20because\n/\x20the\x20runtime\x20cannot\x20de\
+    termine\x20which\x20changes\x20to\x20pick\x20or\x20how\x20to\x20merge\
+    \x20them\x20if\x20both\x20are\x20modified\n\x20instruction\x20modificati\
+    ons\x20of\x20multiply-passed\x20account\x20differ\n\n\r\n\x05\x05\x01\
+    \x02\x18\x01\x12\x04\xcb\x02\x02\x1f\n\r\n\x05\x05\x01\x02\x18\x02\x12\
+    \x04\xcb\x02\"$\n\x83\x02\n\x04\x05\x01\x02\x19\x12\x04\xd1\x02\x02\x0e\
+    \x1a\xf4\x01/\x20Allows\x20on-chain\x20programs\x20to\x20implement\x20pr\
+    ogram-specific\x20error\x20types\x20and\x20see\x20them\x20returned\n/\
+    \x20by\x20the\x20Solana\x20runtime.\x20A\x20program-specific\x20error\
+    \x20may\x20be\x20any\x20type\x20that\x20is\x20represented\x20as\n/\x20or\
+    \x20serialized\x20to\x20a\x20u32\x20integer.\n\x20custom\x20program\x20e\
+    rror:\x20{0:#x}\n\n\r\n\x05\x05\x01\x02\x19\x01\x12\x04\xd1\x02\x02\x08\
+    \n\r\n\x05\x05\x01\x02\x19\x02\x12\x04\xd1\x02\x0b\r\n\xcc\x01\n\x04\x05\
+    \x01\x02\x1a\x12\x04\xd6\x02\x02\x15\x1a\xbd\x01/\x20The\x20return\x20va\
+    lue\x20from\x20the\x20program\x20was\x20invalid.\x20\x20Valid\x20errors\
+    \x20are\x20either\x20a\x20defined\x20builtin\n/\x20error\x20value\x20or\
+    \x20a\x20user-defined\x20error\x20in\x20the\x20lower\x2032\x20bits.\n\
+    \x20program\x20returned\x20invalid\x20error\x20code\n\n\r\n\x05\x05\x01\
+    \x02\x1a\x01\x12\x04\xd6\x02\x02\x0f\n\r\n\x05\x05\x01\x02\x1a\x02\x12\
+    \x04\xd6\x02\x12\x14\ne\n\x04\x05\x01\x02\x1b\x12\x04\xda\x02\x02\x20\
+    \x1aW/\x20Executable\x20account's\x20data\x20was\x20modified\n\x20instru\
+    ction\x20changed\x20executable\x20accounts\x20data\n\n\r\n\x05\x05\x01\
+    \x02\x1b\x01\x12\x04\xda\x02\x02\x1a\n\r\n\x05\x05\x01\x02\x1b\x02\x12\
+    \x04\xda\x02\x1d\x1f\np\n\x04\x05\x01\x02\x1c\x12\x04\xde\x02\x02!\x1ab/\
+    \x20Executable\x20account's\x20lamports\x20modified\n\x20instruction\x20\
+    changed\x20the\x20balance\x20of\x20a\x20executable\x20account\n\n\r\n\
+    \x05\x05\x01\x02\x1c\x01\x12\x04\xde\x02\x02\x1b\n\r\n\x05\x05\x01\x02\
+    \x1c\x02\x12\x04\xde\x02\x1e\x20\na\n\x04\x05\x01\x02\x1d\x12\x04\xe2\
+    \x02\x02*\x1aS/\x20Executable\x20accounts\x20must\x20be\x20rent\x20exemp\
+    t\n\x20executable\x20accounts\x20must\x20be\x20rent\x20exempt\n\n\r\n\
+    \x05\x05\x01\x02\x1d\x01\x12\x04\xe2\x02\x02$\n\r\n\x05\x05\x01\x02\x1d\
+    \x02\x12\x04\xe2\x02')\n?\n\x04\x05\x01\x02\x1e\x12\x04\xe6\x02\x02\x1e\
+    \x1a1/\x20Unsupported\x20program\x20id\n\x20Unsupported\x20program\x20id\
+    \n\n\r\n\x05\x05\x01\x02\x1e\x01\x12\x04\xe6\x02\x02\x18\n\r\n\x05\x05\
+    \x01\x02\x1e\x02\x12\x04\xe6\x02\x1b\x1d\nk\n\x04\x05\x01\x02\x1f\x12\
+    \x04\xea\x02\x02\x12\x1a]/\x20Cross-program\x20invocation\x20call\x20dep\
+    th\x20too\x20deep\n\x20Cross-program\x20invocation\x20call\x20depth\x20t\
+    oo\x20deep\n\n\r\n\x05\x05\x01\x02\x1f\x01\x12\x04\xea\x02\x02\x0c\n\r\n\
+    \x05\x05\x01\x02\x1f\x02\x12\x04\xea\x02\x0f\x11\nu\n\x04\x05\x01\x02\
+    \x20\x12\x04\xee\x02\x02\x17\x1ag/\x20An\x20account\x20required\x20by\
+    \x20the\x20instruction\x20is\x20missing\n\x20An\x20account\x20required\
+    \x20by\x20the\x20instruction\x20is\x20missing\n\n\r\n\x05\x05\x01\x02\
+    \x20\x01\x12\x04\xee\x02\x02\x11\n\r\n\x05\x05\x01\x02\x20\x02\x12\x04\
+    \xee\x02\x14\x16\n\x9c\x01\n\x04\x05\x01\x02!\x12\x04\xf2\x02\x02\x1e\
+    \x1a\x8d\x01/\x20Cross-program\x20invocation\x20reentrancy\x20not\x20all\
+    owed\x20for\x20this\x20instruction\n\x20Cross-program\x20invocation\x20r\
+    eentrancy\x20not\x20allowed\x20for\x20this\x20instruction\n\n\r\n\x05\
+    \x05\x01\x02!\x01\x12\x04\xf2\x02\x02\x18\n\r\n\x05\x05\x01\x02!\x02\x12\
+    \x04\xf2\x02\x1b\x1d\n}\n\x04\x05\x01\x02\"\x12\x04\xf6\x02\x02\x20\x1ao\
+    /\x20Length\x20of\x20the\x20seed\x20is\x20too\x20long\x20for\x20address\
+    \x20generation\n\x20Length\x20of\x20the\x20seed\x20is\x20too\x20long\x20\
+    for\x20address\x20generation\n\n\r\n\x05\x05\x01\x02\"\x01\x12\x04\xf6\
+    \x02\x02\x1a\n\r\n\x05\x05\x01\x02\"\x02\x12\x04\xf6\x02\x1d\x1f\nq\n\
+    \x04\x05\x01\x02#\x12\x04\xfa\x02\x02\x15\x1ac/\x20Provided\x20seeds\x20\
+    do\x20not\x20result\x20in\x20a\x20valid\x20address\n\x20Provided\x20seed\
+    s\x20do\x20not\x20result\x20in\x20a\x20valid\x20address\n\n\r\n\x05\x05\
+    \x01\x02#\x01\x12\x04\xfa\x02\x02\x0f\n\r\n\x05\x05\x01\x02#\x02\x12\x04\
+    \xfa\x02\x12\x14\nd\n\x04\x05\x01\x02$\x12\x04\xfe\x02\x02\x17\x1aV/\x20\
+    Failed\x20to\x20reallocate\x20account\x20data\x20of\x20this\x20length\n\
+    \x20Failed\x20to\x20reallocate\x20account\x20data\n\n\r\n\x05\x05\x01\
+    \x02$\x01\x12\x04\xfe\x02\x02\x11\n\r\n\x05\x05\x01\x02$\x02\x12\x04\xfe\
+    \x02\x14\x16\nM\n\x04\x05\x01\x02%\x12\x04\x82\x03\x02%\x1a?/\x20Computa\
+    tional\x20budget\x20exceeded\n\x20Computational\x20budget\x20exceeded\n\
+    \n\r\n\x05\x05\x01\x02%\x01\x12\x04\x82\x03\x02\x1f\n\r\n\x05\x05\x01\
+    \x02%\x02\x12\x04\x82\x03\"$\n\x9e\x01\n\x04\x05\x01\x02&\x12\x04\x86\
+    \x03\x02\x1c\x1a\x8f\x01/\x20Cross-program\x20invocation\x20with\x20unau\
+    thorized\x20signer\x20or\x20writable\x20account\n\x20Cross-program\x20in\
+    vocation\x20with\x20unauthorized\x20signer\x20or\x20writable\x20account\
+    \n\n\r\n\x05\x05\x01\x02&\x01\x12\x04\x86\x03\x02\x16\n\r\n\x05\x05\x01\
+    \x02&\x02\x12\x04\x86\x03\x19\x1b\n>\n\x04\x05\x01\x02'\x12\x04\x89\x03\
+    \x02)\x1a0\x20Failed\x20to\x20create\x20program\x20execution\x20environm\
+    ent\n\n\r\n\x05\x05\x01\x02'\x01\x12\x04\x89\x03\x02#\n\r\n\x05\x05\x01\
+    \x02'\x02\x12\x04\x89\x03&(\n*\n\x04\x05\x01\x02(\x12\x04\x8c\x03\x02\"\
+    \x1a\x1c\x20Program\x20failed\x20to\x20complete\n\n\r\n\x05\x05\x01\x02(\
+    \x01\x12\x04\x8c\x03\x02\x1c\n\r\n\x05\x05\x01\x02(\x02\x12\x04\x8c\x03\
+    \x1f!\n)\n\x04\x05\x01\x02)\x12\x04\x8f\x03\x02!\x1a\x1b\x20Program\x20f\
+    ailed\x20to\x20compile\n\n\r\n\x05\x05\x01\x02)\x01\x12\x04\x8f\x03\x02\
+    \x1b\n\r\n\x05\x05\x01\x02)\x02\x12\x04\x8f\x03\x1e\x20\n$\n\x04\x05\x01\
+    \x02*\x12\x04\x92\x03\x02\x11\x1a\x16\x20Account\x20is\x20immutable\n\n\
+    \r\n\x05\x05\x01\x02*\x01\x12\x04\x92\x03\x02\x0b\n\r\n\x05\x05\x01\x02*\
+    \x02\x12\x04\x92\x03\x0e\x10\n,\n\x04\x05\x01\x02+\x12\x04\x95\x03\x02\
+    \x1b\x1a\x1e\x20Incorrect\x20authority\x20provided\n\n\r\n\x05\x05\x01\
+    \x02+\x01\x12\x04\x95\x03\x02\x15\n\r\n\x05\x05\x01\x02+\x02\x12\x04\x95\
+    \x03\x18\x1ab\x06proto3\
 ";
 
 static file_descriptor_proto_lazy: ::protobuf::rt::LazyV2<::protobuf::descriptor::FileDescriptorProto> = ::protobuf::rt::LazyV2::INIT;

@@ -1,11 +1,12 @@
-use crate::pb::codec::{
-    AccountChange, BalanceChange, Batch, Instruction, MessageHeader, Transaction,
-};
+use crate::pb::codec::{AccountChange, BalanceChange, Batch, Instruction, MessageHeader, Transaction, InstructionError as PbInstructionError, InstructionErrorType, InstructionErrorCustom, TransactionError as PbTransactionError, TransactionErrorType, TransactionInstructionError};
 use num_traits::ToPrimitive;
-use protobuf::{Message, RepeatedField, SingularPtrField};
+use protobuf::{Message, RepeatedField, SingularPtrField, ProtobufEnum};
 use solana_program::hash::Hash;
 use solana_sdk::{pubkey::Pubkey};
 use std::{borrow::BorrowMut, env, fs::File, str::FromStr, sync::atomic::{AtomicBool, Ordering}};
+use solana_program::instruction::InstructionError;
+// use std::ops::Deref;
+use crate::transaction::TransactionError;
 
 pub static DEEPMIND_ENABLED: AtomicBool = AtomicBool::new(false);
 
@@ -17,6 +18,30 @@ pub fn disable_deepmind() {
 }
 pub fn deepmind_enabled() -> bool {
     return DEEPMIND_ENABLED.load(Ordering::Relaxed);
+}
+
+pub fn inst_err_to_pb(error: &InstructionError) -> Option<PbInstructionError> {
+    let pb_inst_error_type_opt = InstructionErrorType::from_i32(error as i32);
+    if let Some(pb_inst_error_type) = pb_inst_error_type_opt {
+        let mut pb_inst_error =  PbInstructionError {
+            field_type: pb_inst_error_type,
+            ..Default::default()
+        };
+        if let InstructionError::Custom(error_id) = error {
+            let i = &mut InstructionErrorCustom::new();
+            i.set_id(error_id.clone());
+            let pb_any_res = protobuf::well_known_types::Any::pack_dyn(i);
+            match pb_any_res {
+                Ok(pb_any) => {
+                    pb_inst_error.set_payload(pb_any);
+                },
+                Err(e) => {}
+            }
+        }
+        return Some(pb_inst_error)
+    }
+
+    return None
 }
 
 impl Instruction {
@@ -32,6 +57,15 @@ impl Instruction {
         account.prev_data.extend_from_slice(pre);
         account.new_data.extend_from_slice(post);
         self.account_changes.push(account);
+    }
+
+    pub fn error(&mut self, error: &InstructionError) {
+        if let Some(pb_error) = inst_err_to_pb(error) {
+            self.failed = true;
+            self.error = SingularPtrField::from_option(Some(pb_error))
+        } else {
+            panic!(format!("unknown instruction error: {:?}", error));
+        }
     }
 
     pub fn add_lamport_change(&mut self, pubkey: Pubkey, pre: u64, post: u64) {
@@ -84,6 +118,37 @@ impl DMTransaction {
     pub fn end_instruction(&mut self) {
         self.call_stack.pop();
     }
+
+    pub fn error(&mut self, error: &TransactionError) {
+        self.pb_transaction.failed = true;
+        let pb_trx_error_type_opt = TransactionErrorType::from_i32(error as i32);
+        if let Some(pb_trx_error_type) = pb_trx_error_type_opt {
+            let mut pb_trx_error =  PbTransactionError {
+                field_type: pb_trx_error_type,
+                ..Default::default()
+            };
+            if let TransactionError::InstructionError(inst_index, inst_err) = error {
+                if let Some(pb_inst_error) = inst_err_to_pb(&inst_err) {
+                    let i = &mut TransactionInstructionError::new();
+                    i.set_error(pb_inst_error);
+                    i.set_Index(*inst_index as u32);
+                    let pb_any_res = protobuf::well_known_types::Any::pack_dyn(i);
+                    match pb_any_res {
+                        Ok(pb_any) => {
+                            pb_trx_error.set_payload(pb_any);
+                        },
+                        Err(e) => {}
+                    }
+                } else {
+                    panic!(format!("unknown instruction error: {:?}", error));
+                }
+            }
+            self.pb_transaction.error = SingularPtrField::from_option(Some(pb_trx_error))
+        } else {
+            panic!(format!("unknown transaction error: {:?}", error));
+        }
+    }
+
 
     pub fn add_log(&mut self, log: String) {
         self.pb_transaction.log_messages.push(log)
@@ -154,6 +219,13 @@ impl<'a> DMBatchContext {
         })
     }
 
+    pub fn error_trx(&mut self, error: &TransactionError) {
+        if let Some(transaction) = self.trxs.last_mut() {
+            transaction.error(error)
+        }
+        // Do we panic here? this should never happen?
+    }
+
     pub fn flush(&mut self) {
         // loop through transations, and instructions, and logs and whateve, and print it all out
         // in a format ConsoleReader appreciated.
@@ -198,6 +270,13 @@ impl<'a> DMBatchContext {
     pub fn end_instruction(&mut self) {
         if let Some(transaction) = self.trxs.last_mut() {
             transaction.end_instruction()
+        }
+    }
+
+    pub fn error_instruction(&mut self, error: &InstructionError) {
+        if let Some(transaction) = self.trxs.last_mut() {
+            let instruction = transaction.active_instruction();
+            instruction.error(error);
         }
     }
 
