@@ -1076,12 +1076,29 @@ impl MessageProcessor {
         );
         let keyed_accounts =
             Self::create_keyed_accounts(message, instruction, executable_accounts, accounts);
-        self.process_instruction(
+
+        //****************************************************************
+        // DMLOG
+        //****************************************************************
+        let result = self.process_instruction(
             program_id,
             &keyed_accounts,
             &instruction.data,
             &mut invoke_context,
-        )?;
+        );
+        if let Some(ctx_ref) = &dmbatch_context {
+            let ctx = ctx_ref.deref();
+            if result.is_err() {
+                if let Some(error) = &result.err() {
+                    ctx.borrow_mut().error_instruction(error);
+                }
+            }
+        }
+        if result.is_err() {
+            return result
+        }
+        //****************************************************************
+
         Self::verify(
             message,
             instruction,
@@ -1930,7 +1947,7 @@ mod tests {
             None,
             Arc::new(FeatureSet::all_enabled()),
             BpfComputeBudget::new(&FeatureSet::all_enabled()),
-            None,
+            &None,
         );
         assert_eq!(
             result,
