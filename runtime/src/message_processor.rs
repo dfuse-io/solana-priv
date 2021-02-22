@@ -1089,7 +1089,7 @@ impl MessageProcessor {
         if let Some(ctx_ref) = &dmbatch_context {
             let ctx = ctx_ref.deref();
             if result.is_err() {
-                if let Some(error) = &result.err() {
+                if let Some(error) = &result.clone().err() {
                     ctx.borrow_mut().error_instruction(error);
                 }
             }

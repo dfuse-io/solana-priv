@@ -2995,7 +2995,7 @@ impl Bank {
                     //****************************************************************
                     if let Some(ctx_ref) = &dmbatch_context {
                         if process_result.is_err() {
-                            if let Some(error) = &process_result.err() {
+                            if let Some(error) = &process_result.clone().err() {
                                 let ctx = ctx_ref.deref();
                                 ctx.borrow_mut().error_trx(error);
                             }
@@ -3004,7 +3004,7 @@ impl Bank {
                     //****************************************************************
 
                     let nonce_rollback =
-                        if let Err(TransactionError::InstructionError(_,_)) = &process_result {
+                            if let Err(TransactionError::InstructionError(_,_)) = &process_result {
                             error_counters.instruction_error += 1;
                             nonce_rollback.clone()
                         } else if process_result.is_err() {
@@ -3012,6 +3012,7 @@ impl Bank {
                         } else {
                             nonce_rollback.clone()
                         };
+
                     (process_result, nonce_rollback)
                 }
             })
