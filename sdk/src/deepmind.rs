@@ -20,8 +20,78 @@ pub fn deepmind_enabled() -> bool {
     return DEEPMIND_ENABLED.load(Ordering::Relaxed);
 }
 
+pub fn transaction_err_to_i32(error: &TransactionError) -> i32 {
+    return match error {
+        TransactionError::AccountInUse => 0,
+        TransactionError::AccountLoadedTwice => 1,
+        TransactionError::AccountNotFound => 2,
+        TransactionError::ProgramAccountNotFound => 3,
+        TransactionError::InsufficientFundsForFee => 4,
+        TransactionError::InvalidAccountForFee => 5,
+        TransactionError::DuplicateSignature => 6,
+        TransactionError::BlockhashNotFound => 7,
+        TransactionError::InstructionError(_, _) => 8,
+        TransactionError::CallChainTooDeep => 9,
+        TransactionError::MissingSignatureForFee => 10,
+        TransactionError::InvalidAccountIndex => 11,
+        TransactionError::SignatureFailure => 12,
+        TransactionError::InvalidProgramForExecution => 13,
+        TransactionError::SanitizeFailure => 14,
+        TransactionError::ClusterMaintenance => 15,
+    }
+}
+
+pub fn instruction_err_to_i32(error: &InstructionError) -> i32 {
+    return match error {
+        InstructionError::GenericError => 0,
+        InstructionError::InvalidArgument => 1,
+        InstructionError::InvalidInstructionData => 2,
+        InstructionError::InvalidAccountData => 3,
+        InstructionError::AccountDataTooSmall => 4,
+        InstructionError::InsufficientFunds => 5,
+        InstructionError::IncorrectProgramId => 6,
+        InstructionError::MissingRequiredSignature => 7,
+        InstructionError::AccountAlreadyInitialized => 8,
+        InstructionError::UninitializedAccount => 9,
+        InstructionError::UnbalancedInstruction => 10,
+        InstructionError::ModifiedProgramId => 11,
+        InstructionError::ExternalAccountLamportSpend => 12,
+        InstructionError::ExternalAccountDataModified => 13,
+        InstructionError::ReadonlyLamportChange => 14,
+        InstructionError::ReadonlyDataModified => 15,
+        InstructionError::DuplicateAccountIndex => 16,
+        InstructionError::ExecutableModified => 17,
+        InstructionError::RentEpochModified => 18,
+        InstructionError::NotEnoughAccountKeys => 19,
+        InstructionError::AccountDataSizeChanged => 20,
+        InstructionError::AccountNotExecutable => 21,
+        InstructionError::AccountBorrowFailed => 22,
+        InstructionError::AccountBorrowOutstanding => 23,
+        InstructionError::DuplicateAccountOutOfSync => 24,
+        InstructionError::Custom(_) => 25,
+        InstructionError::InvalidError => 26,
+        InstructionError::ExecutableDataModified => 27,
+        InstructionError::ExecutableLamportChange => 28,
+        InstructionError::ExecutableAccountNotRentExempt => 29,
+        InstructionError::UnsupportedProgramId => 30,
+        InstructionError::CallDepth => 31,
+        InstructionError::MissingAccount => 32,
+        InstructionError::ReentrancyNotAllowed => 33,
+        InstructionError::MaxSeedLengthExceeded => 34,
+        InstructionError::InvalidSeeds => 35,
+        InstructionError::InvalidRealloc => 36,
+        InstructionError::ComputationalBudgetExceeded => 37,
+        InstructionError::PrivilegeEscalation => 38,
+        InstructionError::ProgramEnvironmentSetupFailure => 39,
+        InstructionError::ProgramFailedToComplete => 40,
+        InstructionError::ProgramFailedToCompile => 41,
+        InstructionError::Immutable => 42,
+        InstructionError::IncorrectAuthority => 43,
+    };
+}
+
 pub fn inst_err_to_pb(error: &InstructionError) -> Option<PbInstructionError> {
-    let pb_inst_error_type_opt = InstructionErrorType::from_i32(error as i32);
+    let pb_inst_error_type_opt = InstructionErrorType::from_i32(instruction_err_to_i32(error));
     if let Some(pb_inst_error_type) = pb_inst_error_type_opt {
         let mut pb_inst_error =  PbInstructionError {
             field_type: pb_inst_error_type,
@@ -121,7 +191,7 @@ impl DMTransaction {
 
     pub fn error(&mut self, error: &TransactionError) {
         self.pb_transaction.failed = true;
-        let pb_trx_error_type_opt = TransactionErrorType::from_i32(error as i32);
+        let pb_trx_error_type_opt = TransactionErrorType::from_i32(transaction_err_to_i32(error));
         if let Some(pb_trx_error_type) = pb_trx_error_type_opt {
             let mut pb_trx_error =  PbTransactionError {
                 field_type: pb_trx_error_type,
@@ -137,7 +207,9 @@ impl DMTransaction {
                         Ok(pb_any) => {
                             pb_trx_error.set_payload(pb_any);
                         },
-                        Err(e) => {}
+                        Err(e) => {
+                            panic!(format!("unable to proto pack: {:?}", e));
+                        }
                     }
                 } else {
                     panic!(format!("unknown instruction error: {:?}", error));
