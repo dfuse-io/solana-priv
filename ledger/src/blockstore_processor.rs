@@ -55,7 +55,7 @@ use thiserror::Error;
 use std::sync::atomic::{Ordering, AtomicUsize, AtomicU64};
 
 pub type BlockstoreProcessorResult =
-    result::Result<(BankForks, LeaderScheduleCache), BlockstoreProcessorError>;
+result::Result<(BankForks, LeaderScheduleCache), BlockstoreProcessorError>;
 
 thread_local!(static PAR_THREAD_POOL: RefCell<ThreadPool> = RefCell::new(rayon::ThreadPoolBuilder::new()
                     .num_threads(get_thread_count())
@@ -110,7 +110,7 @@ fn execute_batch(
     transaction_status_sender: Option<TransactionStatusSender>,
     replay_vote_sender: Option<&ReplayVoteSender>,
     timings: &mut ExecuteTimings,
-    dmbatch_context: &Option<Rc<RefCell<DMBatchContext>>>
+    dmbatch_context: &Option<Rc<RefCell<DMBatchContext>>>,
 ) -> Result<()> {
     let record_token_balances = transaction_status_sender.is_some();
 
@@ -185,7 +185,7 @@ fn execute_batches(
                 //****************************************************************
                 // DMLOG
                 //****************************************************************
-                let i:AtomicU64 = AtomicU64::new(0);
+                let i: AtomicU64 = AtomicU64::new(0);
                 //****************************************************************
                 batches
                     .into_par_iter()
@@ -818,7 +818,7 @@ pub fn confirm_slot(
         replay_vote_sender,
         &mut execute_timings,
     )
-    .map_err(BlockstoreProcessorError::from);
+        .map_err(BlockstoreProcessorError::from);
     replay_elapsed.stop();
     timing.replay_elapsed += replay_elapsed.as_us();
 
@@ -878,7 +878,7 @@ fn process_bank_0(
         None,
         None,
     )
-    .expect("processing for bank 0 must succeed");
+        .expect("processing for bank 0 must succeed");
     bank0.freeze();
 }
 
@@ -898,6 +898,7 @@ fn process_next_slots(
     initial_forks.insert(bank.slot(), bank.clone());
 
     if meta.next_slots.is_empty() {
+        info!("GRRRR: meta next_slots is empty");
         return Ok(());
     }
 
@@ -934,6 +935,10 @@ fn process_next_slots(
         }
     }
 
+    if pending_slots.is_empty() {
+        info!("GRRRR: Pending is empty");
+    }
+
     // Reverse sort by slot, so the next slot to be processed can be popped
     pending_slots.sort_by(|a, b| b.1.slot().cmp(&a.1.slot()));
     Ok(())
@@ -965,6 +970,12 @@ fn load_frozen_forks(
         "load_frozen_forks() latest root from blockstore: {}, max_root: {}",
         blockstore_max_root, max_root,
     );
+
+    let (last_slot) = root_meta.next_slots.last().unwrap();
+    info!("GRRRR: root meta slots count: {}, last slot: {}",
+          root_meta.next_slots.len(),
+          last_slot,
+    );
     process_next_slots(
         root_bank,
         root_meta,
@@ -980,7 +991,7 @@ fn load_frozen_forks(
         let (last_meta, last_bank, last_entry_hash) = pending_slots.last().unwrap();
         let (first_meta, first_bank, first_entry_hash) = pending_slots.first().unwrap();
         info!(
-            "GRRRR() \
+            "GRRRR: \
             first | last meta slots: {} | {}, \
             first | last bank slot {} | {}, \
             last_entry_hash: {}, \
@@ -1023,7 +1034,7 @@ fn load_frozen_forks(
                 transaction_status_sender.clone(),
                 None,
             )
-            .is_err()
+                .is_err()
             {
                 continue;
             }
@@ -1144,8 +1155,8 @@ fn supermajority_root_from_vote_accounts<I>(
     total_epoch_stake: u64,
     vote_accounts: I,
 ) -> Option<Slot>
-where
-    I: IntoIterator<Item = (Pubkey, (u64, ArcVoteAccount))>,
+    where
+        I: IntoIterator<Item=(Pubkey, (u64, ArcVoteAccount))>,
 {
     let mut roots_stakes: Vec<(Slot, u64)> = vote_accounts
         .into_iter()
@@ -1367,7 +1378,7 @@ pub mod tests {
                 ..ProcessOptions::default()
             },
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(frozen_bank_slots(&bank_forks), vec![0]);
     }
 
@@ -1411,7 +1422,7 @@ pub mod tests {
                 ..ProcessOptions::default()
             },
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(frozen_bank_slots(&bank_forks), vec![0]);
 
         // Write slot 2 fully
@@ -1427,7 +1438,7 @@ pub mod tests {
                 ..ProcessOptions::default()
             },
         )
-        .unwrap();
+            .unwrap();
 
         // One valid fork, one bad fork.  process_blockstore() should only return the valid fork
         assert_eq!(frozen_bank_slots(&bank_forks), vec![0, 2]);
@@ -1772,7 +1783,7 @@ pub mod tests {
             Vec::new(),
             ProcessOptions::default(),
         )
-        .unwrap();
+            .unwrap();
 
         assert_eq!(frozen_bank_slots(&bank_forks), vec![0, 1, 3]);
         assert_eq!(bank_forks.working_bank().slot(), 3);
@@ -1821,7 +1832,7 @@ pub mod tests {
             Vec::new(),
             ProcessOptions::default(),
         )
-        .unwrap();
+            .unwrap();
 
         // Should see the parent of the dead child
         assert_eq!(frozen_bank_slots(&bank_forks), vec![0, 1, 2, 3]);
@@ -1873,7 +1884,7 @@ pub mod tests {
             Vec::new(),
             ProcessOptions::default(),
         )
-        .unwrap();
+            .unwrap();
 
         // Should see only the parent of the dead children
         assert_eq!(frozen_bank_slots(&bank_forks), vec![0]);
@@ -2368,7 +2379,7 @@ pub mod tests {
             None,
             None,
         )
-        .is_err());
+            .is_err());
 
         // First transaction in first entry succeeded, so keypair1 lost 1 lamport
         assert_eq!(bank.get_balance(&keypair1.pubkey()), 3);
@@ -2480,7 +2491,7 @@ pub mod tests {
             None,
             None,
         )
-        .is_err());
+            .is_err());
 
         // last entry should have been aborted before par_execute_entries
         assert_eq!(bank.get_balance(&keypair1.pubkey()), 2);
@@ -2888,7 +2899,7 @@ pub mod tests {
             None,
             None,
         )
-        .unwrap();
+            .unwrap();
         bank1.squash();
 
         // Test process_blockstore_from_root() from slot 1 onwards
@@ -3008,7 +3019,7 @@ pub mod tests {
                 None,
                 None,
             )
-            .expect("process ticks failed");
+                .expect("process ticks failed");
 
             if i % 16 == 0 {
                 if let Some(old_root) = root {
@@ -3058,7 +3069,7 @@ pub mod tests {
             None,
             &mut ExecuteTimings::default(),
         )
-        .unwrap();
+            .unwrap();
         assert_eq!(bank0.get_balance(&keypair.pubkey()), 1)
     }
 
