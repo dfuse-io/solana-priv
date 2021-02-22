@@ -977,10 +977,18 @@ fn load_frozen_forks(
     let dev_halt_at_slot = opts.dev_halt_at_slot.unwrap_or(std::u64::MAX);
 
     if root_bank.slot() != dev_halt_at_slot {
-        let (meta, bank, last_entry_hash) = pending_slots.last().unwrap();
+        let (last_meta, last_bank, last_entry_hash) = pending_slots.last().unwrap();
+        let (first_meta, first_bank, first_entry_hash) = pending_slots.first().unwrap();
         info!(
-            "GRRRR() last meta slots: {} last bank slot {}, last_entry_hash: {}, number of pending slot {}",
-            meta.slot, bank.slot(), last_entry_hash, pending_slots.len(),
+            "GRRRR() \
+            first | last meta slots: {} | {}, \
+            first | last bank slot {} | {}, \
+            last_entry_hash: {}, \
+            number of pending slot {}",
+            first_meta.slot, last_meta.slot,
+            first_bank.slot(), last_bank.slot(),
+            last_entry_hash,
+            pending_slots.len(),
         );
 
         while !pending_slots.is_empty() {
