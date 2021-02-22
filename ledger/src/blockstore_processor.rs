@@ -932,6 +932,8 @@ fn process_next_slots(
                 allocated.since(initial_allocation)
             );
             pending_slots.push((next_meta, next_bank, bank.last_blockhash()));
+        } else {
+            info!("GRRRR: next meta is empty: slot {} : parent slot{}", next_meta.slot, next_meta.parent_slot);
         }
     }
 
