@@ -933,7 +933,7 @@ fn process_next_slots(
             );
             pending_slots.push((next_meta, next_bank, bank.last_blockhash()));
         } else {
-            info!("GRRRR: next meta is empty: slot {} : parent slot{}", next_meta.slot, next_meta.parent_slot);
+            info!("GRRRR: next meta is not full: slot {} : parent slot: {}", next_meta.slot, next_meta.parent_slot);
         }
     }
 
@@ -966,6 +966,7 @@ fn load_frozen_forks(
     let mut last_root = root_bank.slot();
     let mut slots_elapsed = 0;
     let mut txs = 0;
+    let mut last_back_slot = root_bank.slot();
     let blockstore_max_root = blockstore.max_root();
     let max_root = std::cmp::max(root_bank.slot(), blockstore_max_root);
     info!(
@@ -1004,9 +1005,11 @@ fn load_frozen_forks(
             pending_slots.len(),
         );
 
+
         while !pending_slots.is_empty() {
             let (meta, bank, last_entry_hash) = pending_slots.pop().unwrap();
             let slot = bank.slot();
+            last_back_slot = bank.slot();
             if last_status_report.elapsed() > Duration::from_secs(2) {
                 let secs = last_status_report.elapsed().as_secs() as f32;
                 last_status_report = Instant::now();
@@ -1127,6 +1130,11 @@ fn load_frozen_forks(
             }
         }
     }
+    info!(
+        "GRRRR: ledger processed, last_back_slot={}, last root slot={}",
+        last_back_slot,
+        last_root,
+    );
 
     Ok(initial_forks.values().cloned().collect::<Vec<_>>())
 }
