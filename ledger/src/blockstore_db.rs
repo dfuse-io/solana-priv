@@ -6,7 +6,7 @@ use prost::Message;
 pub use rocksdb::Direction as IteratorDirection;
 use rocksdb::{
     self, ColumnFamily, ColumnFamilyDescriptor, DBIterator, DBRawIterator, DBRecoveryMode,
-    IteratorMode as RocksIteratorMode, Options, WriteBatch as RWriteBatch, DB,
+    IteratorMode as RocksIteratorMode, Options, WriteBatch as RWriteBatch, DB, BackupEngine, BackupEngineOptions
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -20,6 +20,7 @@ use solana_storage_proto::convert::generated;
 use solana_transaction_status::TransactionStatusMeta;
 use std::{collections::HashMap, fs, marker::PhantomData, path::Path, sync::Arc};
 use thiserror::Error;
+use rocksdb::backup::BackupEngine;
 
 const MAX_WRITE_BUFFER_SIZE: u64 = 256 * 1024 * 1024; // 256MB
 
@@ -393,6 +394,25 @@ impl Rocks {
     fn is_primary_access(&self) -> bool {
         self.1 == ActualAccessType::Primary
     }
+
+    fn backup(&self, path: &Path){
+        let mut db_options = get_db_backup_options();
+
+        match BackupEngine::open(&db_options, path) {
+            Ok(mut backupEngine) => {
+                info!("Backup engine created");
+                match backupEngine.create_new_backup(&self.0) {
+                    Ok(()) =>{}
+                    Err(err) => {
+                        error!("Error creating backup: {}", err);
+                    }
+                }
+            }
+            Err(err) => {
+                error!("Error when opening backups: {}", err);
+            }
+        }
+    }
 }
 
 pub trait Column {
@@ -748,6 +768,10 @@ impl Database {
         Ok(())
     }
 
+    pub fn backup(&self) {
+        self.backend.backup(self.backend, "");
+    }
+
     pub fn get<C>(&self, key: C::Index) -> Result<Option<C::Type>>
     where
         C: TypedColumn + ColumnName,
@@ -1050,5 +1074,10 @@ fn get_db_options(access_type: &AccessType) -> Options {
         options.set_disable_auto_compactions(true);
     }
 
+    options
+}
+
+fn get_db_backup_options() -> Rocks::BackupEngineOptions {
+    let mut options =  Rocks::BackupEngineOptions::default();
     options
 }
