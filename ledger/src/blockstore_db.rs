@@ -6,7 +6,8 @@ use prost::Message;
 pub use rocksdb::Direction as IteratorDirection;
 use rocksdb::{
     self, ColumnFamily, ColumnFamilyDescriptor, DBIterator, DBRawIterator, DBRecoveryMode,
-    IteratorMode as RocksIteratorMode, Options, WriteBatch as RWriteBatch, DB, BackupEngine, BackupEngineOptions
+    IteratorMode as RocksIteratorMode, Options, WriteBatch as RWriteBatch, DB
+    // IteratorMode as RocksIteratorMode, Options, WriteBatch as RWriteBatch, DB, BackupEngine, BackupEngineOptions
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -395,24 +396,24 @@ impl Rocks {
         self.1 == ActualAccessType::Primary
     }
 
-    fn backup(&self, path: &Path){
-        let mut db_options = get_db_backup_options();
-
-        match BackupEngine::open(&db_options, path) {
-            Ok(mut backupEngine) => {
-                info!("Backup engine created");
-                match backupEngine.create_new_backup(&self.0) {
-                    Ok(()) =>{}
-                    Err(err) => {
-                        error!("Error creating backup: {}", err);
-                    }
-                }
-            }
-            Err(err) => {
-                error!("Error when opening backups: {}", err);
-            }
-        }
-    }
+    // fn backup(&self, path: &Path){
+    //     let mut db_options = get_db_backup_options();
+    //
+    //     match BackupEngine::open(&db_options, path) {
+    //         Ok(mut backupEngine) => {
+    //             info!("Backup engine created");
+    //             match backupEngine.create_new_backup(&self.0) {
+    //                 Ok(()) =>{}
+    //                 Err(err) => {
+    //                     error!("Error creating backup: {}", err);
+    //                 }
+    //             }
+    //         }
+    //         Err(err) => {
+    //             error!("Error when opening backups: {}", err);
+    //         }
+    //     }
+    // }
 }
 
 pub trait Column {
@@ -768,9 +769,9 @@ impl Database {
         Ok(())
     }
 
-    pub fn backup(&self) {
-        self.backend.backup(self.backend, "");
-    }
+    // pub fn backup(&self) {
+    //     self.backend.backup(self.backend, "");
+    // }
 
     pub fn get<C>(&self, key: C::Index) -> Result<Option<C::Type>>
     where
@@ -1077,7 +1078,7 @@ fn get_db_options(access_type: &AccessType) -> Options {
     options
 }
 
-fn get_db_backup_options() -> Rocks::BackupEngineOptions {
-    let mut options =  Rocks::BackupEngineOptions::default();
-    options
-}
+// fn get_db_backup_options() -> Rocks::BackupEngineOptions {
+//     let mut options =  Rocks::BackupEngineOptions::default();
+//     options
+// }
