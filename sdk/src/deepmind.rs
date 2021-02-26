@@ -302,24 +302,28 @@ impl<'a> DMBatchContext {
         // loop through transations, and instructions, and logs and whateve, and print it all out
         // in a format ConsoleReader appreciated.
 
+        // let batch = Batch {
+        //     transactions: RepeatedField::from_vec(
+        //         self.trxs
+        //             .drain(..)
+        //             .into_iter()
+        //             .map(|x| x.pb_transaction)
+        //             .collect(),
+        //     ),
+        //     ..Default::default()
+        // };
+
         let batch = Batch {
-            transactions: RepeatedField::from_vec(
-                self.trxs
-                    .drain(..)
-                    .into_iter()
-                    .map(|x| x.pb_transaction)
-                    .collect(),
-            ),
-            ..Default::default()
+            transactions: Default::default(),
+            unknown_fields: Default::default(),
+            cached_size: Default::default()
         };
 
 
-        // batch.write_to_bytes();
-
-        // if let Err(e) = batch.write_to_writer(&mut self.file) {
-        //     println!("DMLOG ERROR FILE {}", e);
-        //     return;
-        // }
+        if let Err(e) = batch.write_to_writer(&mut self.file) {
+            println!("DMLOG ERROR FILE {}", e);
+            return;
+        }
 
         if let Err(e) = self.file.sync_all() {
             println!("DMLOG ERROR FILE {}", e);

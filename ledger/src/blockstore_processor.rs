@@ -220,7 +220,7 @@ fn execute_batches(
                         // DMLOG
                         //****************************************************************
                         if let Some(ctx_ref) = &dmbatch_ctx_opt {
-                            // ctx_ref.borrow_mut().flush();
+                            ctx_ref.borrow_mut().flush();
                         }
                         //****************************************************************
 
