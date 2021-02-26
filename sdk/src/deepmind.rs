@@ -313,10 +313,13 @@ impl<'a> DMBatchContext {
             ..Default::default()
         };
 
-        if let Err(e) = batch.write_to_writer(&mut self.file) {
-            println!("DMLOG ERROR FILE {}", e);
-            return;
-        }
+
+        batch.write_to_bytes();
+
+        // if let Err(e) = batch.write_to_writer(&mut self.file) {
+        //     println!("DMLOG ERROR FILE {}", e);
+        //     return;
+        // }
 
         if let Err(e) = self.file.sync_all() {
             println!("DMLOG ERROR FILE {}", e);
