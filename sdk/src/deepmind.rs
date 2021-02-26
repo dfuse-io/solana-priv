@@ -314,7 +314,7 @@ impl<'a> DMBatchContext {
         };
 
 
-        batch.write_to_bytes();
+        // batch.write_to_bytes();
 
         // if let Err(e) = batch.write_to_writer(&mut self.file) {
         //     println!("DMLOG ERROR FILE {}", e);
