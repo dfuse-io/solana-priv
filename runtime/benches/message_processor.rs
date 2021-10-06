@@ -25,7 +25,8 @@ fn bench_verify_account_changes_data(bencher: &mut Bencher) {
             &Rent::default(),
             &post,
             &mut ExecuteDetailsTimings::default(),
-            true
+            true,
+            None,
         ),
         Ok(())
     );
@@ -39,6 +40,7 @@ fn bench_verify_account_changes_data(bencher: &mut Bencher) {
             &post,
             &mut ExecuteDetailsTimings::default(),
             true,
+            None,
         )
         .unwrap();
     });
@@ -63,6 +65,7 @@ fn bench_verify_account_changes_data(bencher: &mut Bencher) {
             &post,
             &mut ExecuteDetailsTimings::default(),
             true,
+            None,
         )
         .unwrap();
     });
