@@ -177,7 +177,7 @@ impl PreAccount {
         // DMLOG
         //****************************************************************
         if let Some(ctx_ref) = &dmbatch_context {
-            if self.is_writable && (pre.data != post.data) {
+            if is_writable && (pre.data != post.data) {
                 let ctx = ctx_ref.deref();
                 ctx.borrow_mut().account_change(self.key, &pre.data, &post.data)
             }
@@ -342,25 +342,6 @@ impl<'a> ThisInvokeContext<'a> {
             dmbatch_context,
         }
     }
-
-    //****************************************************************
-    // DMLOG
-    //****************************************************************
-    fn dmbatch_start_instruction(&self, program_id: Pubkey, keyed_accounts: &[String], instruction_data: &[u8]) {
-        if let Some(ctx_ref) = &self.dmbatch_context {
-            let ctx = ctx_ref.deref();
-            ctx.borrow_mut().start_instruction(program_id, keyed_accounts, instruction_data);
-        }
-    }
-
-    fn dmbatch_end_instruction(&self) {
-        if let Some(ctx_ref) = &self.dmbatch_context {
-            let ctx = ctx_ref.deref();
-            ctx.borrow_mut().end_instruction();
-        }
-    }
-    //****************************************************************
-
 }
 impl<'a> InvokeContext for ThisInvokeContext<'a> {
     fn push(&mut self, key: &Pubkey) -> Result<(), InstructionError> {
@@ -501,6 +482,24 @@ impl<'a> InvokeContext for ThisInvokeContext<'a> {
             None
         }
     }
+
+    //****************************************************************
+    // DMLOG
+    //****************************************************************
+    fn dmbatch_start_instruction(&self, program_id: Pubkey, keyed_accounts: &[String], instruction_data: &[u8]) {
+        if let Some(ctx_ref) = &self.dmbatch_context {
+            let ctx = ctx_ref.deref();
+            ctx.borrow_mut().start_instruction(program_id, keyed_accounts, instruction_data);
+        }
+    }
+
+    fn dmbatch_end_instruction(&self) {
+        if let Some(ctx_ref) = &self.dmbatch_context {
+            let ctx = ctx_ref.deref();
+            ctx.borrow_mut().end_instruction();
+        }
+    }
+    //****************************************************************
 }
 pub struct ThisLogger {
     log_collector: Option<Rc<LogCollector>>,
