@@ -6,4 +6,4 @@
 #
 # and ensure you have `protoc` installed.
 
-protoc --rust_out ./pb -I ~/codebase/dfuse-io/proto-solana dfuse/solana/codec/v1/codec.proto
+protoc --rust_out ./pb -I /Users/cbillett/devel/sf/proto-solana sf/solana/codec/v1/codec.proto

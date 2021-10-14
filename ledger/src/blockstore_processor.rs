@@ -280,6 +280,7 @@ fn process_entries_with_callback(
         match entry {
             EntryType::Tick(hash) => {
                 // If it's a tick, save it for later
+                let tick_hash = hash.clone();
                 tick_hashes.push(hash);
 
                 //****************************************************************
@@ -309,7 +310,7 @@ fn process_entries_with_callback(
                     // DMLOG
                     //****************************************************************
                     if deepmind_enabled() {
-                        println!("DMLOG SLOT_BOUND {} {}", (upper_tick_height / bank.ticks_per_slot()) - 1, entry.hash);
+                        println!("DMLOG SLOT_BOUND {} {}", (upper_tick_height / bank.ticks_per_slot()) - 1, tick_hash);
                     }
                     //****************************************************************
                 }
@@ -852,7 +853,8 @@ pub fn confirm_slot(
             println!("DMLOG BLOCK_FAILED {} {:#?}", slot, process_result);
         } else {
             if slot_full {
-                println!("DMLOG BLOCK_END {} {} {} {}", slot, entries.last().unwrap().hash, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
+                // println!("DMLOG BLOCK_END {} {} {} {}", slot, entries.last().unwrap(), bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
+                println!("DMLOG BLOCK_END {} FIXEDSLOTIDBECAUSEWEDONTNEEDITANDCODECHANGED {} {}", slot, bank.unix_timestamp_from_genesis(), bank.clock().unix_timestamp);
             }
         }
     }

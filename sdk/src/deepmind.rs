@@ -28,7 +28,7 @@ pub fn transaction_err_to_i32(error: &TransactionError) -> i32 {
         TransactionError::ProgramAccountNotFound => 3,
         TransactionError::InsufficientFundsForFee => 4,
         TransactionError::InvalidAccountForFee => 5,
-        TransactionError::DuplicateSignature => 6,
+        TransactionError::AlreadyProcessed => 6,
         TransactionError::BlockhashNotFound => 7,
         TransactionError::InstructionError(_, _) => 8,
         TransactionError::CallChainTooDeep => 9,
@@ -87,6 +87,9 @@ pub fn instruction_err_to_i32(error: &InstructionError) -> i32 {
         InstructionError::ProgramFailedToCompile => 41,
         InstructionError::Immutable => 42,
         InstructionError::IncorrectAuthority => 43,
+        InstructionError::BorshIoError(_) => 44,
+        InstructionError::AccountNotRentExempt => 45,
+        InstructionError::InvalidAccountOwner => 46,
     };
 }
 
@@ -215,7 +218,7 @@ impl DMTransaction {
                     panic!(format!("unknown instruction error: {:?}", error));
                 }
             }
-            self.pb_transaction.error = SingularPtrField::from_option(Some(pb_trx_error))
+            self.pb_transaction.errors = SingularPtrField::from_option(Some(pb_trx_error))
         } else {
             panic!(format!("unknown transaction error: {:?}", error));
         }

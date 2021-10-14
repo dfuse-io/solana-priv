@@ -85,6 +85,7 @@ tiny-bip39 = "0.7.0"
 
 [build-dependencies]
 rustc_version = "0.2"
+protoc-rust = "1.5"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
