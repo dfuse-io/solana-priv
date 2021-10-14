@@ -3793,6 +3793,8 @@ impl AccountsDb {
                 "Mismatched total lamports: {} calculated: {}",
                 total_lamports, calculated_lamports
             );
+            // DMLOG: this breaks for chain segment at 50M, try disabling this error see
+            // if we can go further, if there's an issue with our snapshot. Etc
             return Err(MismatchedTotalLamports(calculated_lamports, total_lamports));
         }
 
