@@ -3699,8 +3699,10 @@ impl Bank {
                     //****************************************************************
                     if let Some(ctx_ref) = &dmbatch_context {
                         let ctx = ctx_ref.deref();
-                        for log in log_messages.unwrap() {
-                            ctx.borrow_mut().add_log(log);
+                        if let Some(log_messages) = log_messages {
+                            for log in log_messages {
+                                ctx.borrow_mut().add_log(log);
+                            }
                         }
                     }
                     //****************************************************************
