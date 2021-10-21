@@ -3691,20 +3691,21 @@ impl Bank {
                         &dmbatch_context,
                     );
 
-                    let log_messages: TransactionLogMessages = Self::collect_log_messages(log_collector);
+                    let log_messages: Option<TransactionLogMessages> = Self::collect_log_messages(log_collector);
+                    let tx_log_messages: Option<TransactionLogMessages>= log_messages.clone();
 
                     //****************************************************************
                     // DMLOG
                     //****************************************************************
                     if let Some(ctx_ref) = &dmbatch_context {
                         let ctx = ctx_ref.deref();
-                        for log in log_messages.clone() {
+                        for log in log_messages.unwrap() {
                             ctx.borrow_mut().add_log(log);
                         }
                     }
                     //****************************************************************
 
-                    transaction_log_messages.push(log_messages);
+                    transaction_log_messages.push(tx_log_messages);
                     inner_instructions.push(Self::compile_recorded_instructions(
                         instruction_recorders,
                         &tx.message,
@@ -8783,7 +8784,7 @@ pub(crate) mod tests {
                 false,
                 false,
                 &mut ExecuteTimings::default(),
-                None,
+                &None,
             )
             .0
             .fee_collection_results;
@@ -10860,7 +10861,7 @@ pub(crate) mod tests {
                 false,
                 false,
                 &mut ExecuteTimings::default(),
-                None,
+                &None,
             );
 
         assert!(inner_instructions.iter().all(Option::is_none));
@@ -13851,6 +13852,7 @@ pub(crate) mod tests {
                 false,
                 true,
                 &mut ExecuteTimings::default(),
+                &None
             )
             .3;
         assert_eq!(log_results.len(), 3);

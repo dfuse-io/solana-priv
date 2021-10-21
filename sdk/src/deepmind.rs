@@ -28,7 +28,7 @@ pub fn transaction_err_to_i32(error: &TransactionError) -> i32 {
         TransactionError::ProgramAccountNotFound => 3,
         TransactionError::InsufficientFundsForFee => 4,
         TransactionError::InvalidAccountForFee => 5,
-        TransactionError::DuplicateSignature => 6,
+        TransactionError::AlreadyProcessed => 6,
         TransactionError::BlockhashNotFound => 7,
         TransactionError::InstructionError(_, _) => 8,
         TransactionError::CallChainTooDeep => 9,
@@ -38,6 +38,10 @@ pub fn transaction_err_to_i32(error: &TransactionError) -> i32 {
         TransactionError::InvalidProgramForExecution => 13,
         TransactionError::SanitizeFailure => 14,
         TransactionError::ClusterMaintenance => 15,
+        TransactionError::AccountBorrowOutstanding => 16,
+        TransactionError::WouldExceedMaxBlockCostLimit => 17,
+        TransactionError::UnsupportedVersion => 18,
+        TransactionError::InvalidWritableAccount => 19,
     }
 }
 
@@ -87,6 +91,12 @@ pub fn instruction_err_to_i32(error: &InstructionError) -> i32 {
         InstructionError::ProgramFailedToCompile => 41,
         InstructionError::Immutable => 42,
         InstructionError::IncorrectAuthority => 43,
+        InstructionError::BorshIoError(_) => 44,
+        InstructionError::AccountNotRentExempt => 45,
+        InstructionError::InvalidAccountOwner => 46,
+        InstructionError::ArithmeticOverflow => 47,
+        InstructionError::UnsupportedSysvar => 48,
+        InstructionError::IllegalOwner => 49,
     };
 }
 
@@ -105,7 +115,7 @@ pub fn inst_err_to_pb(error: &InstructionError) -> Option<PbInstructionError> {
                 Ok(pb_any) => {
                     pb_inst_error.set_payload(pb_any);
                 },
-                Err(e) => {}
+                Err(_e) => {}
             }
         }
         return Some(pb_inst_error)
