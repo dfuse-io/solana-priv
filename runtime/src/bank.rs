@@ -3217,6 +3217,20 @@ impl Bank {
                         None
                     };
 
+                    //****************************************************************
+                    // DMLOG
+                    //****************************************************************
+                    let msg = tx.message();
+                    let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>();
+                    let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>();
+
+
+                    if let Some(ctx_ref) = &dmbatch_context {
+                        let ctx = ctx_ref.deref();
+                        ctx.borrow_mut().start_trx(sigs, msg.header.num_required_signatures, msg.header.num_readonly_signed_accounts, msg.header.num_readonly_unsigned_accounts, account_keys, msg.recent_blockhash);
+                    }
+                    //****************************************************************
+
                     let mut process_result = self.message_processor.process_message(
                         tx.message(),
                         &loader_refcells,
@@ -3232,21 +3246,6 @@ impl Bank {
                         &self.ancestors,
                         &dmbatch_context,
                     );
-
-                    //****************************************************************
-                    // DMLOG
-                    //****************************************************************
-                    let msg = tx.message();
-                    let account_keys = msg.account_keys.iter().map(|i| i.to_string()).collect::<Vec<String>>();
-                    let sigs = tx.signatures.iter().map(|i| i.to_string()).collect::<Vec<String>>();
-
-
-                    if let Some(ctx_ref) = &dmbatch_context {
-                        let ctx = ctx_ref.deref();
-                        ctx.borrow_mut().start_trx(sigs, msg.header.num_required_signatures, msg.header.num_readonly_signed_accounts, msg.header.num_readonly_unsigned_accounts, account_keys, msg.recent_blockhash);
-                    }
-                    //****************************************************************
-
 
                     let log_messages: Option<TransactionLogMessages> = Self::collect_log_messages(log_collector);
                     let dm_log_messages = log_messages.clone();
@@ -8325,7 +8324,7 @@ pub(crate) mod tests {
                 false,
                 false,
                 &mut ExecuteTimings::default(),
-                None,
+                &None,
             )
             .0
             .fee_collection_results;
@@ -10394,7 +10393,7 @@ pub(crate) mod tests {
                 false,
                 false,
                 &mut ExecuteTimings::default(),
-                None,
+                &None,
             );
 
         assert!(inner_instructions.iter().all(Option::is_none));
@@ -13462,6 +13461,7 @@ pub(crate) mod tests {
                 false,
                 true,
                 &mut ExecuteTimings::default(),
+                &None,
             )
             .3;
         assert_eq!(log_results.len(), 3);

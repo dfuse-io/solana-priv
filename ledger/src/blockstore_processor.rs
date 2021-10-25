@@ -3305,7 +3305,7 @@ pub mod tests {
             false,
             false,
             &mut ExecuteTimings::default(),
-            None,
+            &None,
         );
         let (err, signature) = get_first_error(&batch, fee_collection_results).unwrap();
         // First error found should be for the 2nd transaction, due to iteration_order

@@ -1427,6 +1427,7 @@ mod tests {
             Arc::new(FeatureSet::all_enabled()),
             Arc::new(Accounts::default()),
             &ancestors,
+            &None,
         );
 
         // Check call depth increases and has a limit
@@ -1611,6 +1612,7 @@ mod tests {
                 &mut ExecuteDetailsTimings::default(),
                 false,
                 true,
+                &None,
             )
         }
     }
@@ -2038,6 +2040,7 @@ mod tests {
             &mut ExecuteDetailsTimings::default(),
             Arc::new(Accounts::default()),
             &ancestors,
+            &None,
         );
         assert_eq!(result, Ok(()));
         assert_eq!(accounts[0].1.borrow().lamports(), 100);
@@ -2065,6 +2068,7 @@ mod tests {
             &mut ExecuteDetailsTimings::default(),
             Arc::new(Accounts::default()),
             &ancestors,
+            &None,
         );
         assert_eq!(
             result,
@@ -2096,6 +2100,7 @@ mod tests {
             &mut ExecuteDetailsTimings::default(),
             Arc::new(Accounts::default()),
             &ancestors,
+            &None,
         );
         assert_eq!(
             result,
@@ -2219,6 +2224,7 @@ mod tests {
             &mut ExecuteDetailsTimings::default(),
             Arc::new(Accounts::default()),
             &ancestors,
+            &None,
         );
         assert_eq!(
             result,
@@ -2250,6 +2256,7 @@ mod tests {
             &mut ExecuteDetailsTimings::default(),
             Arc::new(Accounts::default()),
             &ancestors,
+            &None,
         );
         assert_eq!(result, Ok(()));
 
@@ -2279,6 +2286,7 @@ mod tests {
             &mut ExecuteDetailsTimings::default(),
             Arc::new(Accounts::default()),
             &ancestors,
+            &None,
         );
         assert_eq!(result, Ok(()));
         assert_eq!(accounts[0].1.borrow().lamports(), 80);
@@ -2382,6 +2390,7 @@ mod tests {
             Arc::new(FeatureSet::all_enabled()),
             Arc::new(Accounts::default()),
             &ancestors,
+            &None,
         );
 
         // not owned account modified by the caller (before the invoke)
@@ -2438,6 +2447,7 @@ mod tests {
                 Arc::new(FeatureSet::all_enabled()),
                 Arc::new(Accounts::default()),
                 &ancestors,
+                &None,
             );
 
             let caller_write_privileges = message
